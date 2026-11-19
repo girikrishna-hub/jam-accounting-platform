@@ -122,7 +122,10 @@ describe('access authority (Authorization Runtime)', () => {
   it('binds every policy to the firm and denies an unknown role', async () => {
     const policies = buildPolicies('firm');
     expect(policies.every((p) => p.conditions.some((c) => c.type === 'tenant'))).toBe(true);
-    expect(await decide({ role: 'nobody' as AccessQuestion['role'] })).toBe(false);
+    const unknown = await authority.decide({ ...base, role: 'nobody' as AccessQuestion['role'] });
+    // Since authorization-runtime 1.2.0 the runtime itself denies (no longer throws).
+    expect(unknown).toMatchObject({ allowed: false, decision: 'DENY' });
+    expect(unknown.reason).toMatch(/MissingReference/);
   });
 });
 
