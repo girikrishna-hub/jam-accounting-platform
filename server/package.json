@@ -1,0 +1,31 @@
+{
+  "name": "@jam/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "seed:demo": "tsx src/scripts/seed-demo.ts",
+    "create-admin": "tsx src/scripts/create-admin.ts"
+  },
+  "dependencies": {
+    "@governedai-labs/bookkeeping-runtime": "1.1.1",
+    "@governedai-labs/bookkeeping-runtime-postgres": "1.1.1",
+    "express": "^5.1.0",
+    "pg": "^8.16.0",
+    "tsx": "^4.20.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.15.0",
+    "@types/supertest": "^6.0.0",
+    "supertest": "^7.1.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
