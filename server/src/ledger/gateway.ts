@@ -155,6 +155,37 @@ export class LedgerGateway {
     return this.runtime.postOpeningBalances({ ...await this.command(a, 'bookkeeping.PostOpeningBalances', requestId), lines });
   }
 
+  async draftEntry(a: LedgerActor, input: { entryDate: string; description: string; externalReference?: string; lines: LineInput[] }, requestId?: string): Promise<EntryView> {
+    return this.runtime.draftEntry({ ...await this.command(a, 'bookkeeping.DraftEntry', requestId), ...input });
+  }
+
+  async updateDraft(a: LedgerActor, input: { entryId: string; entryDate: string; description: string; externalReference?: string; lines: LineInput[] }): Promise<EntryView> {
+    return this.runtime.updateDraft({ ...await this.command(a, 'bookkeeping.UpdateDraft'), ...input });
+  }
+
+  async discardDraft(a: LedgerActor, entryId: string): Promise<EntryView> {
+    return this.runtime.discardDraft({ ...await this.command(a, 'bookkeeping.DiscardDraft'), entryId });
+  }
+
+  async postEntry(a: LedgerActor, entryId: string, requestId?: string): Promise<EntryView> {
+    return this.runtime.postEntry({ ...await this.command(a, 'bookkeeping.PostEntry', requestId), entryId });
+  }
+
+  async reverseEntry(a: LedgerActor, input: { entryId: string; reversalDate: string; reason: string }, requestId?: string): Promise<EntryView> {
+    return this.runtime.reverseEntry({ ...await this.command(a, 'bookkeeping.ReverseEntry', requestId), ...input });
+  }
+
+  async getEntry(a: LedgerActor, entryId: string): Promise<EntryView> {
+    return this.runtime.getEntry({ ...await this.query(a, 'bookkeeping.GetEntry'), entryId });
+  }
+
+  /** The opening journal's entry ID, if posted (always posting sequence 1). */
+  async openingEntryId(a: LedgerActor): Promise<string | null> {
+    const page = await this.runtime.getPostedLines({ ...await this.query(a, 'bookkeeping.GetPostedLines'), fromSequence: 1, toSequence: 1 });
+    const line = page.items.find((l) => l.entryKind === 'opening');
+    return line ? line.entryId : null;
+  }
+
   // ---- Reporting reads ----
 
   async getLedger(a: LedgerActor): Promise<LedgerView> {

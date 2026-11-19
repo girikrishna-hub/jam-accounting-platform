@@ -7,14 +7,18 @@ import type { ResourceType } from '../access/authority.ts';
 import type { AppContext, OrgScope } from '../http/middleware.ts';
 import { HttpError, notFound } from '../http/errors.ts';
 import { importChartOfAccounts, openNextPeriod, postOpeningBalances } from '../services/books.ts';
-import { updateProfile } from '../services/organisations.ts';
+import { setJournalApproval, updateProfile } from '../services/organisations.ts';
+import {
+  approveJournal, createJournal, discardJournal, postJournal, returnJournal, reverseJournal, submitJournal, updateJournal,
+} from '../services/journals.ts';
 import { resolveObject } from './objects.ts';
 import { audit } from '../audit.ts';
 
 const CSV = z.string().min(1).max(2_000_000);
 const ACCOUNT_CLASSIFICATION = /^(PL|BS)(\.[A-Z0-9_]+){1,5}$/;
 
-type Handler = (ctx: AppContext, scope: OrgScope, objectId: string, input: unknown) => Promise<unknown>;
+type Handler = (ctx: AppContext, scope: OrgScope, objectId: string, input: unknown, idempotencyKey: string) => Promise<unknown>;
+const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
 /** Business execution for each workspace action. The workspace only routes; this commits. */
 const HANDLERS: Record<string, Handler> = {
@@ -49,6 +53,20 @@ const HANDLERS: Record<string, Handler> = {
     return ctx.ledger.updateAccount(scope.actor, { accountId, ...body });
   },
   'account.deactivate': async (ctx, scope, accountId) => ctx.ledger.deactivateAccount(scope.actor, accountId),
+  'org.controls.update': async (ctx, scope, _id, input) => {
+    const { journalApprovalRequired } = z.object({ journalApprovalRequired: z.boolean() }).parse(input);
+    const org = await setJournalApproval(ctx.db, scope.actor.actorId, scope.org.id, journalApprovalRequired);
+    return { journalApprovalRequired: org.journal_approval_required };
+  },
+  // The workspace idempotency key doubles as the ledger request ID, so a retried create drafts once.
+  'journal.create': async (ctx, scope, _id, input, key) => createJournal(ctx, scope, input, `draft:${scope.actor.ledgerId}:${key}`),
+  'journal.update': async (ctx, scope, entryId, input) => updateJournal(ctx, scope, entryId, input),
+  'journal.submit': async (ctx, scope, entryId) => submitJournal(ctx, scope, entryId),
+  'journal.approve': async (ctx, scope, entryId) => approveJournal(ctx, scope, entryId),
+  'journal.return': async (ctx, scope, entryId, input) => returnJournal(ctx, scope, entryId, z.object({ reason: z.string().max(500) }).parse(input).reason),
+  'journal.post': async (ctx, scope, entryId) => postJournal(ctx, scope, entryId),
+  'journal.discard': async (ctx, scope, entryId) => discardJournal(ctx, scope, entryId),
+  'journal.reverse': async (ctx, scope, entryId, input) => reverseJournal(ctx, scope, entryId, z.object({ reversalDate: ISO_DATE, reason: z.string().max(500) }).parse(input)),
 };
 
 export interface ExecuteRequest {
@@ -93,7 +111,7 @@ export async function executeAction(ctx: AppContext, scope: OrgScope, req: Execu
   }
 
   try {
-    const result = await handler(ctx, scope, req.objectId, req.input);
+    const result = await handler(ctx, scope, req.objectId, req.input, key);
     await ctx.db.query(`UPDATE app.action_executions SET state = 'SUCCEEDED', result = $2, updated_at = now() WHERE execution_id = $1`, [executionId, JSON.stringify(result ?? null)]);
     return { executionId, state: 'SUCCEEDED', result };
   } catch (error) {

@@ -12,6 +12,7 @@ export interface OrganisationRow {
   country: string;
   currency: string;
   financial_year_start: number;
+  journal_approval_required: boolean;
   opening_date: string;
   status: 'active' | 'suspended' | 'archived';
   ledger_request_id: string;
@@ -19,7 +20,7 @@ export interface OrganisationRow {
   created_at: string;
 }
 
-const COLUMNS = `id, name, legal_name, trn, country, currency, financial_year_start,
+const COLUMNS = `id, name, legal_name, trn, country, currency, financial_year_start, journal_approval_required,
   to_char(opening_date, 'YYYY-MM-DD') AS opening_date, status, ledger_request_id, ledger_id, created_at`;
 
 export async function getOrganisation(db: Db, orgId: string): Promise<OrganisationRow | null> {
@@ -95,5 +96,12 @@ export async function updateProfile(db: Db, actorId: string, orgId: string, inpu
     [orgId, input.name, input.legalName, input.trn, input.financialYearStart],
   );
   await audit(db, { actorId, orgId, action: 'organisation.profile.update', target: orgId, detail: input });
+  return (await getOrganisation(db, orgId))!;
+}
+
+/** Journal approval (maker-checker) for one client. Changed by a reviewer; audited. */
+export async function setJournalApproval(db: Db, actorId: string, orgId: string, required: boolean): Promise<OrganisationRow> {
+  await db.query('UPDATE app.organisations SET journal_approval_required = $2 WHERE id = $1', [orgId, required]);
+  await audit(db, { actorId, orgId, action: 'organisation.controls.update', target: orgId, detail: { journalApprovalRequired: required } });
   return (await getOrganisation(db, orgId))!;
 }

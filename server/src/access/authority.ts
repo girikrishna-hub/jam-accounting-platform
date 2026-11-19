@@ -20,7 +20,7 @@ const ROLE_NAMES = new Map<string, string>([
   ['accountant', 'Accountant'], ['reviewer', 'Reviewer'], ['client_viewer', 'Client viewer'], [FIRM_ADMIN, 'Firm administrator'],
 ]);
 export type Principal = Role | typeof FIRM_ADMIN;
-export type ResourceType = 'client-organisation' | 'account' | 'period' | 'ledger' | 'firm';
+export type ResourceType = 'client-organisation' | 'account' | 'period' | 'journal' | 'ledger' | 'firm';
 
 export interface AccessQuestion {
   readonly userId: string;

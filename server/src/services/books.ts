@@ -7,12 +7,10 @@ import { formatMinor } from '../domain/money.ts';
 import { audit } from '../audit.ts';
 import type { OrganisationRow } from './organisations.ts';
 
-export class BusinessRuleError extends Error {
-  constructor(readonly code: string, message: string, readonly details?: unknown) {
-    super(message);
-    this.name = 'BusinessRuleError';
-  }
-}
+import { BusinessRuleError } from './rule-error.ts';
+import { registerOpening } from './journals.ts';
+
+export { BusinessRuleError };
 
 export interface ImportSummary {
   created: number;
@@ -78,6 +76,7 @@ export async function postOpeningBalances(db: Db, ledger: LedgerGateway, actor: 
   }
   // One opening journal per ledger: a stable request ID makes a double-click or retry harmless.
   const entry = await ledger.postOpeningBalances(actor, plan.lines, `opening:${actor.ledgerId}`);
+  await registerOpening(db, org.id, entry, actor.actorId);
   const result = { entryId: entry.entryId, lines: plan.lines.length, totalDebits: formatMinor(plan.totalDebits), totalCredits: formatMinor(plan.totalCredits) };
   await audit(db, { actorId: actor.actorId, orgId: org.id, action: 'opening-balances.post', target: entry.entryId, detail: result });
   return result;
