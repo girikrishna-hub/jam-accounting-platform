@@ -49,7 +49,7 @@ export function authRoutes(ctx: AppContext): Router {
     res.json({
       user: { id: user.id, email: user.email, displayName: user.displayName, isFirmAdmin: user.isFirmAdmin, sessionRef: user.sessionRef },
       firmId: ctx.config.firmId,
-      organisations: orgs.filter((o) => o.status !== 'archived').map((o) => ({ id: o.id, name: o.name, role: o.role, status: o.status })),
+      organisations: orgs.filter((o) => o.status !== 'archived').map((o) => ({ id: o.id, name: o.name, role: o.role, status: o.status, currency: o.currency })),
     });
   });
 
