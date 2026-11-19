@@ -1,4 +1,5 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { hashOpaqueKeyForLookup } from '@governedai-labs/auth-runtime';
 import type { Db } from '../db/db.ts';
 
 export const SESSION_COOKIE = 'jam_session';
@@ -12,7 +13,8 @@ export interface SessionUser {
   sessionRef: string;
 }
 
-const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+/** Session tokens are stored only as the Authentication Runtime's lookup hash. */
+const hashToken = (token: string) => hashOpaqueKeyForLookup(token);
 
 export async function startSession(db: Db, userId: string, ttlMs: number): Promise<{ token: string; expiresAt: Date }> {
   const token = randomBytes(32).toString('base64url');

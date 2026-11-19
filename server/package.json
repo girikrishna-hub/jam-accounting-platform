@@ -12,10 +12,13 @@
     "create-admin": "tsx src/scripts/create-admin.ts"
   },
   "dependencies": {
+    "@governedai-labs/auth-runtime": "1.1.0",
     "@governedai-labs/bookkeeping-runtime": "1.1.1",
     "@governedai-labs/bookkeeping-runtime-postgres": "1.1.1",
+    "@governedai-labs/identity-contracts": "1.2.0",
+    "@governedai-labs/identity-orchestrator-runtime": "1.1.0",
     "express": "^5.1.0",
-    "pg": "^8.16.0",
+    "pg": "^8.22.0",
     "tsx": "^4.20.0",
     "zod": "^3.25.0"
   },

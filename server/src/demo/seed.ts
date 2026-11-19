@@ -43,7 +43,10 @@ export async function seedDemo(db: Db, ledger: LedgerGateway, password: string, 
   ];
   for (const [userId, orgId, role] of grants) await assign(db, adminId, { userId, orgId, role });
 
-  const actor = { actorId: accountantId, principal: 'accountant' as const, ledgerId: harbourview.ledger_id! };
+  const actor = {
+    actorId: accountantId, principal: 'accountant' as const,
+    assignedOrganisationId: harbourview.id, organisationId: harbourview.id, ledgerId: harbourview.ledger_id!,
+  };
   const coa = await importChartOfAccounts(db, ledger, actor, harbourview.id, await readFile(seedDir + 'chart-of-accounts.csv', 'utf8'));
   log(`Chart of accounts: ${coa.created} created, ${coa.alreadyPresent} already present, ${coa.errors.length} errors`);
   for (const e of coa.errors) log(`  line ${e.line}: ${e.message}`);

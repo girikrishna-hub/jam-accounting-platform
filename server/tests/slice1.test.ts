@@ -156,6 +156,23 @@ describe.skipIf(!TEST_DATABASE_URL)('slice 1 acceptance', () => {
       const reviewer = await signIn(h.app, 'reviewer@firm.test');
       expect((await reviewer.get(`/api/orgs/${h.orgs.harbourview}/trial-balance`)).status).toBe(404);
     });
+    it('locks an account after five failed sign-ins (Authentication Runtime lockout policy)', async () => {
+      const attempt = () => request(h.app).post('/api/auth/sign-in').set('x-jam-csrf', '1').send({ email: 'bm@firm.test', password: 'Wrong-Password-000' });
+      for (let i = 0; i < 5; i += 1) expect((await attempt()).status).toBe(401);
+      expect((await attempt()).status).toBe(429);
+      const correct = await request(h.app).post('/api/auth/sign-in').set('x-jam-csrf', '1').send({ email: 'bm@firm.test', password: PASSWORD });
+      expect(correct.status).toBe(429);
+    });
+    it('records refused actions against the actor\'s own client', async () => {
+      await act(hvViewer, 'period.open', hvOrgRef, {}, 'viewer-denied-0001');
+      const denied = await h.db.query<{ org_id: string }>(`SELECT org_id FROM app.audit WHERE action = 'access.denied' AND actor_id = $1`, [h.users.hvViewer]);
+      expect(denied.rows.length).toBeGreaterThan(0);
+      expect(denied.rows.every((r) => r.org_id === h.orgs.harbourview)).toBe(true);
+      const crossNoise = await h.db.query(`SELECT 1 FROM app.audit WHERE action = 'access.denied' AND org_id = $1`, [h.orgs.harbourview]);
+      const bmEntries = await h.db.query(`SELECT 1 FROM app.audit WHERE action = 'access.denied' AND org_id = $1 AND actor_id = $2`, [h.orgs.harbourview, h.users.bmViewer]);
+      expect(crossNoise.rowCount).toBeGreaterThan(0);
+      expect(bmEntries.rowCount).toBe(0);
+    });
     it('records user access changes and imports in the client activity', async () => {
       const activity = await accountant.get(`/api/orgs/${h.orgs.harbourview}/activity`);
       const actions = activity.body.items.map((i: { what: string }) => i.what);

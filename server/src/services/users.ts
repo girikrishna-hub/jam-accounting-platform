@@ -15,7 +15,7 @@ export interface UserRow {
 export async function createUser(db: Db, actorId: string | null, input: { email: string; displayName: string; password: string; isFirmAdmin?: boolean }): Promise<UserRow> {
   const id = randomUUID();
   const email = input.email.trim().toLowerCase();
-  const hash = await hashPassword(input.password);
+  const hash = hashPassword(input.password);
   const r = await db.query<UserRow>(
     `INSERT INTO app.users (id, email, display_name, password_hash, is_firm_admin) VALUES ($1, $2, $3, $4, $5)
      RETURNING id, email, display_name, is_firm_admin, status`,

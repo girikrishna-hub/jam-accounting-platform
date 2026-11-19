@@ -4,8 +4,8 @@ import { parseCsv } from '../src/domain/csv.ts';
 import { parseChartOfAccounts } from '../src/domain/chart-of-accounts.ts';
 import { planOpeningBalances } from '../src/domain/opening-balances.ts';
 import { issueDecision, makeDecisionVerifier } from '../src/access/decisions.ts';
-import { mayPerform } from '../src/access/policy.ts';
-import { canInvokeAction, canViewCapability } from '../../shared/workspace-model.ts';
+import { AccessAuthority, buildPolicies, type AccessQuestion } from '../src/access/authority.ts';
+import { checkPassword, hashPassword, verifyPassword } from '../src/auth/passwords.ts';
 import { addDays, endOfMonth } from '../src/services/books.ts';
 
 describe('money', () => {
@@ -88,22 +88,56 @@ describe('authorization decisions', () => {
   });
 });
 
-describe('policy', () => {
-  it('client viewers only read', () => {
-    expect(mayPerform('client_viewer', 'bookkeeping.GetTrialBalance')).toBe(true);
-    for (const op of ['bookkeeping.CreateAccount', 'bookkeeping.PostEntry', 'bookkeeping.OpenPeriod', 'bookkeeping.ReverseEntry', 'bookkeeping.ClosePeriod']) {
-      expect(mayPerform('client_viewer', op)).toBe(false);
-    }
-    expect(canInvokeAction('client_viewer', 'client-organisation', 'coa.import')).toBe(false);
-    expect(canViewCapability('client_viewer', 'client-organisation', 'periods')).toBe(false);
-    expect(canViewCapability('client_viewer', 'client-organisation', 'trial-balance')).toBe(true);
+describe('access authority (Authorization Runtime)', () => {
+  const authority = new AccessAuthority('firm');
+  const base: AccessQuestion = {
+    userId: 'u1', role: 'accountant', assignedOrganisationId: 'orgA', resourceType: 'ledger', resourceId: 'led-a',
+    resourceOrganisationId: 'orgA', action: 'bookkeeping.PostEntry',
+  };
+  const decide = async (over: Partial<AccessQuestion>) => (await authority.decide({ ...base, ...over })).allowed;
+
+  it('allows an accountant to post in their own client only', async () => {
+    expect(await decide({})).toBe(true);
+    expect(await decide({ resourceOrganisationId: 'orgB' })).toBe(false);
+    expect(await decide({ assignedOrganisationId: 'orgB' })).toBe(false);
   });
-  it('only the server creates ledgers; reviewers close periods, accountants do not', () => {
-    expect(mayPerform('accountant', 'bookkeeping.CreateLedger')).toBe(false);
-    expect(mayPerform('system', 'bookkeeping.CreateLedger')).toBe(true);
-    expect(mayPerform('reviewer', 'bookkeeping.ClosePeriod')).toBe(true);
-    expect(mayPerform('accountant', 'bookkeeping.ClosePeriod')).toBe(false);
-    expect(mayPerform('accountant', 'bookkeeping.Unknown')).toBe(false);
+  it('keeps client viewers read-only', async () => {
+    expect(await decide({ role: 'client_viewer', action: 'bookkeeping.GetTrialBalance' })).toBe(true);
+    for (const action of ['bookkeeping.CreateAccount', 'bookkeeping.PostEntry', 'bookkeeping.OpenPeriod', 'bookkeeping.ReverseEntry', 'bookkeeping.ClosePeriod']) {
+      expect(await decide({ role: 'client_viewer', action }), action).toBe(false);
+    }
+    expect(await decide({ role: 'client_viewer', resourceType: 'client-organisation', resourceId: 'orgA', action: 'coa.import' })).toBe(false);
+    expect(await decide({ role: 'client_viewer', resourceType: 'client-organisation', resourceId: 'orgA', action: 'capability.periods.view' })).toBe(false);
+    expect(await decide({ role: 'client_viewer', resourceType: 'client-organisation', resourceId: 'orgA', action: 'capability.trial-balance.view' })).toBe(true);
+  });
+  it('reserves ledger creation and administration for firm administrators; reviewers close periods', async () => {
+    expect(await decide({ action: 'bookkeeping.CreateLedger' })).toBe(false);
+    expect(await decide({ role: 'firm_admin', assignedOrganisationId: null, action: 'bookkeeping.CreateLedger' })).toBe(true);
+    expect(await decide({ resourceType: 'firm', resourceId: 'firm', resourceOrganisationId: null, action: 'admin.users.create' })).toBe(false);
+    expect(await decide({ role: 'firm_admin', assignedOrganisationId: null, resourceType: 'firm', resourceId: 'firm', resourceOrganisationId: null, action: 'admin.users.create' })).toBe(true);
+    expect(await decide({ role: 'reviewer', action: 'bookkeeping.ClosePeriod' })).toBe(true);
+    expect(await decide({ action: 'bookkeeping.ClosePeriod' })).toBe(false);
+    expect(await decide({ action: 'bookkeeping.Unknown' })).toBe(false);
+  });
+  it('binds every policy to the firm and denies an unknown role', async () => {
+    const policies = buildPolicies('firm');
+    expect(policies.every((p) => p.conditions.some((c) => c.type === 'tenant'))).toBe(true);
+    expect(await decide({ role: 'nobody' as AccessQuestion['role'] })).toBe(false);
+  });
+});
+
+describe('passwords (Authentication Runtime)', () => {
+  it('applies the password rule', () => {
+    expect(checkPassword('Correct-Horse-Battery-42').ok).toBe(true);
+    expect(checkPassword('short1A').ok).toBe(false);
+    expect(checkPassword('alllowercase-123').ok).toBe(false);
+    expect(checkPassword('NoDigitsHereAtAll').ok).toBe(false);
+  });
+  it('hashes and verifies', () => {
+    const hash = hashPassword('Correct-Horse-Battery-42');
+    expect(verifyPassword('Correct-Horse-Battery-42', hash)).toBe(true);
+    expect(verifyPassword('Correct-Horse-Battery-43', hash)).toBe(false);
+    expect(verifyPassword('anything', 'not-a-hash')).toBe(false);
   });
 });
 

@@ -2,17 +2,17 @@ import type { Role } from '../../../shared/workspace-model.ts';
 
 /**
  * Which roles may perform each ledger runtime operation (design pack, Phase 3 matrix).
- * `system` is the server acting for the firm administrator when a client is created.
- * Anything not listed is refused.
+ * `system` is the firm administrator creating a client's books. This table is data only:
+ * it is compiled into Authorization Runtime policies (access/authority.ts), which decide.
  */
-export type Principal = Role | 'system';
+export type LedgerPrincipal = Role | 'system';
 
-const READ_ALL: readonly Principal[] = ['accountant', 'reviewer', 'client_viewer'];
-const STAFF: readonly Principal[] = ['accountant', 'reviewer'];
-const PREPARER: readonly Principal[] = ['accountant'];
-const REVIEWER: readonly Principal[] = ['reviewer'];
+const READ_ALL: readonly LedgerPrincipal[] = ['accountant', 'reviewer', 'client_viewer'];
+const STAFF: readonly LedgerPrincipal[] = ['accountant', 'reviewer'];
+const PREPARER: readonly LedgerPrincipal[] = ['accountant'];
+const REVIEWER: readonly LedgerPrincipal[] = ['reviewer'];
 
-export const LEDGER_POLICY: Readonly<Record<string, readonly Principal[]>> = {
+export const LEDGER_POLICY: Readonly<Record<string, readonly LedgerPrincipal[]>> = {
   'bookkeeping.CreateLedger': ['system'],
   'bookkeeping.SuspendLedger': ['system'],
   'bookkeeping.ResumeLedger': ['system'],
@@ -40,10 +40,6 @@ export const LEDGER_POLICY: Readonly<Record<string, readonly Principal[]>> = {
   'bookkeeping.ListEvents': [],
   'bookkeeping.ListAuditRecords': READ_ALL,
 };
-
-export function mayPerform(principal: Principal, operation: string): boolean {
-  return (LEDGER_POLICY[operation] ?? []).includes(principal);
-}
 
 export class AccessDenied extends Error {
   constructor(readonly reason: string) {

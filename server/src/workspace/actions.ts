@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { RuntimeError } from '@governedai-labs/bookkeeping-runtime';
-import { canInvokeAction, actionModel } from '../../../shared/workspace-model.ts';
+import { actionModel } from '../../../shared/workspace-model.ts';
+import { requireAllowed } from '../access/checks.ts';
+import type { ResourceType } from '../access/authority.ts';
 import type { AppContext, OrgScope } from '../http/middleware.ts';
 import { HttpError, notFound } from '../http/errors.ts';
 import { importChartOfAccounts, openNextPeriod, postOpeningBalances } from '../services/books.ts';
@@ -65,16 +67,16 @@ export interface Execution {
 }
 
 /**
- * Executes a workspace action at the business commit boundary: re-checks the role against
- * the action, re-resolves the object inside the caller's client, and enforces the
+ * Executes a workspace action at the business commit boundary: asks the Authorization Runtime
+ * again for this action, re-resolves the object inside the caller's client, and enforces the
  * idempotency key durably (one execution per client, action and key).
  */
 export async function executeAction(ctx: AppContext, scope: OrgScope, req: ExecuteRequest): Promise<Execution> {
   const action = actionModel(req.actionId);
   const handler = HANDLERS[req.actionId];
   if (!action || !handler || action.objectTypeId !== req.objectTypeId) throw notFound();
-  if (!canInvokeAction(scope.role, req.objectTypeId, req.actionId)) throw new HttpError(403, 'FORBIDDEN', 'You do not have permission for this action.');
-  if (!(await resolveObject(ctx.ledger, scope, req.objectTypeId, req.objectId))) throw notFound();
+  await requireAllowed(ctx, scope, req.objectTypeId as ResourceType, req.objectId, req.actionId);
+  if (!(await resolveObject(ctx, scope, req.objectTypeId, req.objectId))) throw notFound();
 
   const key = req.idempotencyKey ?? randomUUID();
   const executionId = randomUUID();

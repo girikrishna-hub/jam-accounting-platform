@@ -10,7 +10,7 @@ const email = process.env.ADMIN_EMAIL;
 const name = process.env.ADMIN_NAME ?? 'Firm administrator';
 const password = process.env.ADMIN_PASSWORD;
 if (!email || !password) {
-  console.error('Set ADMIN_EMAIL and ADMIN_PASSWORD (at least 12 characters).');
+  console.error('Set ADMIN_EMAIL and ADMIN_PASSWORD (at least 12 characters, with upper case, lower case and a digit).');
   process.exit(1);
 }
 

@@ -1,7 +1,8 @@
-import { canViewCapability, objectTypeModel, type ObjectTypeId, type Role } from '../../../shared/workspace-model.ts';
-import type { LedgerGateway } from '../ledger/gateway.ts';
-import type { OrgScope } from '../http/middleware.ts';
+import type { ObjectTypeId, Role } from '../../../shared/workspace-model.ts';
+import type { AppContext, OrgScope } from '../http/middleware.ts';
 import { formatMinor } from '../domain/money.ts';
+import { isAllowed } from '../access/checks.ts';
+import type { ResourceType } from '../access/authority.ts';
 
 export type MetadataValue = string | number | boolean | null;
 
@@ -15,17 +16,21 @@ export interface Projection {
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const ROLE_LABEL: Record<Role, string> = { accountant: 'Accountant', reviewer: 'Reviewer', client_viewer: 'Client viewer' };
 
-/** The role may see at least one capability of the object type (otherwise the workspace is closed to it). */
-export function mayOpen(role: Role, objectTypeId: string): boolean {
-  return Boolean(objectTypeModel(objectTypeId)?.capabilities.some((c) => canViewCapability(role, objectTypeId, c.capabilityId)));
+const OBJECT_TYPES = new Set(['client-organisation', 'account', 'period']);
+
+/** Whether the Authorization Runtime lets this user open a workspace on this object. */
+export function mayOpen(ctx: AppContext, scope: OrgScope, objectTypeId: string, objectId: string): Promise<boolean> {
+  if (!OBJECT_TYPES.has(objectTypeId)) return Promise.resolve(false);
+  return isAllowed(ctx, scope, objectTypeId as ResourceType, objectId, 'workspace.open');
 }
 
 /**
  * Resolves an object's presentation metadata from authoritative records, within the caller's
  * client only. Returns null when the object is not in that client or the role may not open it.
  */
-export async function resolveObject(ledger: LedgerGateway, scope: OrgScope, objectTypeId: string, objectId: string): Promise<Projection | null> {
-  if (!mayOpen(scope.role, objectTypeId)) return null;
+export async function resolveObject(ctx: AppContext, scope: OrgScope, objectTypeId: string, objectId: string): Promise<Projection | null> {
+  if (!(await mayOpen(ctx, scope, objectTypeId, objectId))) return null;
+  const { ledger } = ctx;
   const { org } = scope;
   if (objectTypeId === 'client-organisation') {
     if (objectId !== org.id) return null;
@@ -64,15 +69,16 @@ export async function resolveObject(ledger: LedgerGateway, scope: OrgScope, obje
 }
 
 /** Searches accounts and periods in one client. The role's capability rules filter the results. */
-export async function searchObjects(ledger: LedgerGateway, scope: OrgScope, query: string, objectTypeIds: readonly string[] | undefined, limit: number): Promise<Projection[]> {
+export async function searchObjects(ctx: AppContext, scope: OrgScope, query: string, objectTypeIds: readonly string[] | undefined, limit: number): Promise<Projection[]> {
+  const { ledger } = ctx;
   const q = query.trim().toLowerCase();
-  const wants = (t: string) => (!objectTypeIds || objectTypeIds.includes(t)) && mayOpen(scope.role, t);
+  const wants = async (t: string) => (!objectTypeIds || objectTypeIds.includes(t)) && isAllowed(ctx, scope, t as ResourceType, '*', 'object.search');
   const results: Projection[] = [];
-  if (wants('client-organisation') && scope.org.name.toLowerCase().includes(q)) {
-    const p = await resolveObject(ledger, scope, 'client-organisation', scope.org.id);
+  if ((await wants('client-organisation')) && scope.org.name.toLowerCase().includes(q)) {
+    const p = await resolveObject(ctx, scope, 'client-organisation', scope.org.id);
     if (p) results.push(p);
   }
-  if (wants('account')) {
+  if (await wants('account')) {
     for (const a of await ledger.listAccounts(scope.actor)) {
       if (results.length >= limit) break;
       if (a.code.toLowerCase().startsWith(q) || a.name.toLowerCase().includes(q)) {
@@ -80,7 +86,7 @@ export async function searchObjects(ledger: LedgerGateway, scope: OrgScope, quer
       }
     }
   }
-  if (wants('period')) {
+  if (await wants('period')) {
     for (const p of await ledger.listPeriods(scope.actor)) {
       if (results.length >= limit) break;
       if (p.startDate.includes(q) || p.endDate.includes(q)) {

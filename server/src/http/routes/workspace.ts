@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
-import { APPLICATION_ID, OBJECT_TYPE_IDS, canInvokeAction, canViewCapability } from '../../../../shared/workspace-model.ts';
+import { APPLICATION_ID, OBJECT_TYPE_IDS } from '../../../../shared/workspace-model.ts';
+import { isAllowed } from '../../access/checks.ts';
+import type { ResourceType } from '../../access/authority.ts';
 import type { SessionUser } from '../../auth/sessions.ts';
 import { audit } from '../../audit.ts';
 import { executeAction } from '../../workspace/actions.ts';
-import { mayOpen, resolveObject, searchObjects } from '../../workspace/objects.ts';
+import { resolveObject, searchObjects } from '../../workspace/objects.ts';
 import { HttpError, notFound } from '../errors.ts';
 import { resolveScope, userOf, type AppContext } from '../middleware.ts';
 
@@ -64,22 +66,13 @@ export function workspaceRoutes(ctx: AppContext): Router {
       return deny('NOT_ASSIGNED');
     }
     const { objectTypeId, objectId } = request.object;
-    let allowed: boolean;
-    switch (request.purpose) {
-      case 'WORKSPACE_OPEN':
-      case 'OBJECT_SEARCH':
-        allowed = mayOpen(scope.role, objectTypeId);
-        break;
-      case 'CAPABILITY_VIEW': {
-        const m = /^capability\.([a-z-]+)\.view$/.exec(request.actionId);
-        allowed = Boolean(m && canViewCapability(scope.role, objectTypeId, m[1]!));
-        break;
-      }
-      default:
-        allowed = canInvokeAction(scope.role, objectTypeId, request.actionId);
-    }
-    if (!allowed) return deny('ROLE_NOT_PERMITTED');
-    if (request.purpose !== 'OBJECT_SEARCH' && !(await resolveObject(ctx.ledger, scope, objectTypeId, objectId))) return deny('OBJECT_NOT_IN_SCOPE');
+    // The workspace's question, put to the Authorization Runtime as an action on this object.
+    const action = request.purpose === 'WORKSPACE_OPEN' ? 'workspace.open'
+      : request.purpose === 'OBJECT_SEARCH' ? 'object.search'
+      : request.actionId;
+    if (!(await isAllowed(ctx, scope, objectTypeId as ResourceType, objectId, action))) return deny('ROLE_NOT_PERMITTED');
+    // Except for search, the object must exist inside this client (read from authoritative records).
+    if (request.purpose !== 'OBJECT_SEARCH' && !(await resolveObject(ctx, scope, objectTypeId, objectId))) return deny('OBJECT_NOT_IN_SCOPE');
     res.json({ outcome: 'ALLOW', decisionReference: randomUUID(), policyVersion: POLICY_VERSION });
   });
 
@@ -88,7 +81,7 @@ export function workspaceRoutes(ctx: AppContext): Router {
     const { reference } = z.object({ reference: ObjectRef }).parse(req.body);
     const scope = await resolveScope(ctx, userOf(res), reference.organisationId);
     if (reference.tenantId !== ctx.config.firmId) throw notFound();
-    const projection = await resolveObject(ctx.ledger, scope, reference.objectTypeId, reference.objectId);
+    const projection = await resolveObject(ctx, scope, reference.objectTypeId, reference.objectId);
     if (!projection) throw notFound();
     res.json({ projection });
   });
@@ -102,7 +95,7 @@ export function workspaceRoutes(ctx: AppContext): Router {
       limit: z.number().int().min(1).max(50),
     }).parse(req.body);
     const scope = await resolveScope(ctx, userOf(res), body.organisationId);
-    res.json({ objects: await searchObjects(ctx.ledger, scope, body.query, body.objectTypeIds, body.limit) });
+    res.json({ objects: await searchObjects(ctx, scope, body.query, body.objectTypeIds, body.limit) });
   });
 
   /** ActionExecutorPort.execute */

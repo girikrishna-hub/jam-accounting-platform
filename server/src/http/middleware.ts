@@ -3,13 +3,16 @@ import type { AppConfig } from '../config.ts';
 import type { Db } from '../db/db.ts';
 import type { LedgerActor, LedgerGateway } from '../ledger/gateway.ts';
 import { SESSION_COOKIE, sessionUser, type SessionUser } from '../auth/sessions.ts';
-import { ensureLedger, getOrganisation, roleInOrganisation, type OrganisationRow } from '../services/organisations.ts';
+import { getOrganisation, roleInOrganisation, type OrganisationRow } from '../services/organisations.ts';
+import type { AccessAuthority } from '../access/authority.ts';
 import type { Role } from '../../../shared/workspace-model.ts';
 import { HttpError, notFound } from './errors.ts';
 
 export interface AppContext {
   readonly db: Db;
   readonly ledger: LedgerGateway;
+  /** Allow/deny decisions, made by the Authorization Runtime. */
+  readonly access: AccessAuthority;
   readonly config: AppConfig;
 }
 
@@ -66,11 +69,6 @@ export const requireUser: RequestHandler = (_req, res, next) => {
   next();
 };
 
-export const requireFirmAdmin: RequestHandler = (_req, res, next) => {
-  if (!res.locals.user) return next(new HttpError(401, 'UNAUTHENTICATED', 'Please sign in.'));
-  if (!res.locals.user.isFirmAdmin) return next(new HttpError(403, 'FORBIDDEN', 'Firm administrators only.'));
-  next();
-};
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -84,8 +82,12 @@ export async function resolveScope(ctx: AppContext, user: SessionUser, orgId: st
   if (!role) throw notFound();
   const org = await getOrganisation(ctx.db, orgId);
   if (!org || org.status === 'archived') throw notFound();
-  const ledgerId = org.ledger_id ?? (await ensureLedger(ctx.db, ctx.ledger, user.id, orgId));
-  return { org: { ...org, ledger_id: ledgerId }, role, actor: { actorId: user.id, principal: role, ledgerId } };
+  if (!org.ledger_id) throw new HttpError(503, 'BOOKS_PENDING', 'This client\'s books are still being set up. Ask the firm administrator to retry.');
+  return {
+    org: { ...org, ledger_id: org.ledger_id },
+    role,
+    actor: { actorId: user.id, sessionRef: user.sessionRef, principal: role, assignedOrganisationId: orgId, organisationId: org.id, ledgerId: org.ledger_id },
+  };
 }
 
 /** For routes under /api/orgs/:orgId. */

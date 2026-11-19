@@ -25,7 +25,7 @@ A cloud accounting platform operated by an accounting firm. The firm's accountan
 | `DATABASE_URL` | Yes | PostgreSQL connection string (Replit provides this when a database is added) |
 | `DECISION_SIGNING_KEY` | Yes | Random string of at least 32 characters; signs the server's authorization decisions |
 | `SEED_DEMO` | Optional | `1` loads the fictitious Harbourview Chambers demo at start-up (skips anything already loaded) |
-| `DEMO_PASSWORD` | With `SEED_DEMO` | One password (12+ characters) for every demo user |
+| `DEMO_PASSWORD` | With `SEED_DEMO` | One password for every demo user: 12+ characters with upper case, lower case and a digit |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Optional | Create the first firm administrator at start-up when none exists |
 
 ## Running

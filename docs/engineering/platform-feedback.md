@@ -1,6 +1,6 @@
 # Platform feedback (internal)
 
-Gaps found while building this app, to raise with the runtimes' owner. The app works around each one without copying runtime code.
+Gaps found while building this app, for the runtimes' owner to decide on. Runtime changes are made only by the owner. Until then the app handles each one itself, without copying or changing runtime code.
 
 | # | Runtime | Finding | Effect | Workaround in this app |
 | --- | --- | --- | --- | --- |
@@ -11,3 +11,6 @@ Gaps found while building this app, to raise with the runtimes' owner. The app w
 | PF-5 | bookkeeping-runtime 1.1.1 | Journal lines have no party or matter dimension. | Receivables, payables and clients'-money ledgers need their own sub-ledgers (Slices 3 and 1b). | Planned as application sub-ledgers. |
 | PF-6 | financial-statements-runtime 1.0.1 | No cash flow statement. | Needed in Slice 5. | Planned as an application calculation. |
 | PF-7 | bookkeeping-runtime 1.1.1 | One currency per ledger. | USD accounts are held at JMD equivalents. | Planned: store foreign amount and rate on app records. |
+| PF-8 | identity-runtime, auth-runtime, session-runtime, iar-rbac-runtime, authorization-runtime 1.1.0 | The PostgreSQL adapters (`PgIdentityStore`, `PgCredentialStore`, `PgLockoutCache`, `PgSessionStore`, `PgRoleStore`, `PgPermissionStore`, `PgAuthorizationPolicyStore`) need `iar_*` tables, but no package publishes the schema or a `migrate()` (Bookkeeping does). | The runtimes' own storage cannot be used, so identities, credentials and sessions stay in app tables. | Follows the PEP pattern: `auth-runtime` functions and lockout policy, Authorization Runtime for decisions, app-owned user and session tables. |
+| PF-9 | iar-rbac-runtime 1.1.0 | An assigned role with no Role definition throws `MissingReference` rather than returning a decision. | A caller must catch it to fail closed. | The app registers its four roles and treats any runtime error as a denial. |
+

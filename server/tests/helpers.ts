@@ -4,6 +4,8 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { createPool, migrate, type Db } from '../src/db/db.ts';
 import { LedgerGateway } from '../src/ledger/gateway.ts';
+import { AccessAuthority } from '../src/access/authority.ts';
+import { audit } from '../src/audit.ts';
 import { createApp } from '../src/http/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { createUser, assign } from '../src/services/users.ts';
@@ -11,7 +13,7 @@ import { createOrganisation } from '../src/services/organisations.ts';
 import type { Role } from '../../shared/workspace-model.ts';
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
-export const PASSWORD = 'correct horse battery staple';
+export const PASSWORD = 'Correct-Horse-Battery-42';
 export const seedDir = fileURLToPath(new URL('../../seed/harbourview/', import.meta.url));
 export const readSeed = (name: string) => readFile(seedDir + name, 'utf8');
 
@@ -19,6 +21,7 @@ export interface Harness {
   db: Db;
   app: Express;
   ledger: LedgerGateway;
+  access: AccessAuthority;
   firmId: string;
   users: Record<'admin' | 'accountant' | 'reviewer' | 'hvViewer' | 'bmViewer', string>;
   orgs: { harbourview: string; blueMountain: string };
@@ -32,8 +35,12 @@ export async function setup(): Promise<Harness> {
   const db = createPool(TEST_DATABASE_URL);
   await db.query('DROP SCHEMA IF EXISTS app CASCADE; DROP SCHEMA IF EXISTS bookkeeping CASCADE;');
   await migrate(db);
-  const ledger = await LedgerGateway.create(db, config.decisionSigningKey);
-  const app = createApp({ db, ledger, config });
+  const access = new AccessAuthority(config.firmId, (q, decision, reason) => audit(db, {
+    actorId: q.userId, orgId: q.assignedOrganisationId, action: 'access.denied', target: `${q.resourceType}:${q.resourceId}`,
+    outcome: 'rejected', detail: { action: q.action, decision, reason },
+  }));
+  const ledger = await LedgerGateway.create(db, config.decisionSigningKey, access);
+  const app = createApp({ db, ledger, access, config });
 
   const mk = async (email: string, admin = false) => (await createUser(db, null, { email, displayName: email, password: PASSWORD, isFirmAdmin: admin })).id;
   const users = {
@@ -50,7 +57,7 @@ export async function setup(): Promise<Harness> {
     [users.accountant, blueMountain, 'accountant'], [users.bmViewer, blueMountain, 'client_viewer'],
   ];
   for (const [userId, orgId, role] of grants) await assign(db, users.admin, { userId, orgId, role });
-  return { db, app, ledger, firmId: config.firmId, users, orgs: { harbourview, blueMountain }, close: () => db.end() };
+  return { db, app, ledger, access, firmId: config.firmId, users, orgs: { harbourview, blueMountain }, close: () => db.end() };
 }
 
 /** A signed-in agent with the CSRF header on every request. */

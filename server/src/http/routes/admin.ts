@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { ROLES } from '../../../../shared/workspace-model.ts';
 import { allOrganisations, createOrganisation } from '../../services/organisations.ts';
 import { assign, createUser, listUsers, revoke, setUserStatus } from '../../services/users.ts';
-import { MIN_PASSWORD_LENGTH } from '../../auth/passwords.ts';
+import { MIN_PASSWORD_LENGTH, PASSWORD_RULE, checkPassword } from '../../auth/passwords.ts';
 import { HttpError } from '../errors.ts';
-import { requireFirmAdmin, userOf, type AppContext } from '../middleware.ts';
+import { requireUser, userOf, type AppContext } from '../middleware.ts';
+import { requireFirmAction } from '../../access/checks.ts';
 
 const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
@@ -30,24 +31,29 @@ const Revoke = z.object({ userId: z.string().uuid(), orgId: z.string().uuid() })
 /** Firm administration console (a documented non-object screen). Every change is audited. */
 export function adminRoutes(ctx: AppContext): Router {
   const r = Router();
-  r.use(requireFirmAdmin);
+  r.use(requireUser);
 
   r.get('/organisations', async (_req, res) => {
+    await requireFirmAction(ctx, userOf(res), 'admin.organisations.read');
     res.json({ organisations: (await allOrganisations(ctx.db)).map((o) => ({ id: o.id, name: o.name, legalName: o.legal_name, trn: o.trn, currency: o.currency, openingDate: o.opening_date, status: o.status, hasLedger: Boolean(o.ledger_id) })) });
   });
 
   r.post('/organisations', async (req, res) => {
+    await requireFirmAction(ctx, userOf(res), 'admin.organisations.create');
     const input = NewOrg.parse(req.body);
     const org = await createOrganisation(ctx.db, ctx.ledger, userOf(res).id, input);
     res.status(201).json({ id: org.id, name: org.name });
   });
 
   r.get('/users', async (_req, res) => {
+    await requireFirmAction(ctx, userOf(res), 'admin.users.read');
     res.json({ users: (await listUsers(ctx.db)).map((u) => ({ id: u.id, email: u.email, displayName: u.display_name, isFirmAdmin: u.is_firm_admin, status: u.status, assignments: u.assignments })) });
   });
 
   r.post('/users', async (req, res) => {
+    await requireFirmAction(ctx, userOf(res), 'admin.users.create');
     const input = NewUser.parse(req.body);
+    if (!checkPassword(input.password).ok) throw new HttpError(422, 'WEAK_PASSWORD', `Password rule: ${PASSWORD_RULE}`);
     const exists = await ctx.db.query('SELECT 1 FROM app.users WHERE email = $1', [input.email]);
     if (exists.rowCount) throw new HttpError(409, 'EMAIL_TAKEN', 'A user with this email already exists.');
     const user = await createUser(ctx.db, userOf(res).id, input);
@@ -55,6 +61,7 @@ export function adminRoutes(ctx: AppContext): Router {
   });
 
   r.post('/users/:userId/status', async (req, res) => {
+    await requireFirmAction(ctx, userOf(res), 'admin.users.status');
     const { status } = z.object({ status: z.enum(['active', 'disabled']) }).parse(req.body);
     const userId = z.string().uuid().parse(req.params.userId);
     if (userId === userOf(res).id && status === 'disabled') throw new HttpError(422, 'SELF_DISABLE', 'You cannot disable your own account.');
@@ -63,12 +70,14 @@ export function adminRoutes(ctx: AppContext): Router {
   });
 
   r.post('/assignments', async (req, res) => {
+    await requireFirmAction(ctx, userOf(res), 'admin.assignments.change');
     const input = Assignment.parse(req.body) as z.infer<typeof Assignment> & { role: (typeof ROLES)[number] };
     await assign(ctx.db, userOf(res).id, input);
     res.json({ ok: true });
   });
 
   r.delete('/assignments', async (req, res) => {
+    await requireFirmAction(ctx, userOf(res), 'admin.assignments.change');
     await revoke(ctx.db, userOf(res).id, Revoke.parse(req.body));
     res.json({ ok: true });
   });

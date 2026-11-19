@@ -111,7 +111,7 @@ export function Admin() {
           <h3>New user</h3>
           <label>Name<input name="displayName" required maxLength={200} /></label>
           <label>Email<input name="email" type="email" required /></label>
-          <label>Temporary password (12+ characters)<input name="password" type="password" minLength={12} required autoComplete="new-password" /></label>
+          <label>Temporary password (12+ characters, upper and lower case, a digit)<input name="password" type="password" minLength={12} required autoComplete="new-password" /></label>
           <label className="check"><input name="isFirmAdmin" type="checkbox" /> Firm administrator</label>
           <button type="submit">Create user</button>
         </form>
