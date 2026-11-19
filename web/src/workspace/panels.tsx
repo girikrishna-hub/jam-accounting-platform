@@ -4,7 +4,8 @@ import { workspacePath } from '../../../shared/workspace-model.ts';
 import { formatMinor, type Money } from '../api.ts';
 import { Link } from '../app-context.tsx';
 import type { ActionFeedback } from './feedback.ts';
-import { ErrorText, Loading, Notice, ROLE_LABEL, hasAction, readFileText, useAction, useData, useWorkspaceTools } from './tools.tsx';
+import { ErrorText, Loading, Notice, ROLE_LABEL, hasAction, readFileText, useAction, useData, useFlash, useWorkspaceTools } from './tools.tsx';
+import { ClientJournals, JournalLines, JournalReview } from './journal-panels.tsx';
 
 interface Account {
   accountId: string; code: string; name: string; type: string; normalBalance: 'debit' | 'credit';
@@ -12,7 +13,7 @@ interface Account {
 }
 interface Period { periodId: string; startDate: string; endDate: string; state: 'open' | 'closed'; reopenCount: number }
 interface TrialBalance { asOf: string; currency: string; totalDebits: Money; totalCredits: Money; rows: { account: Account; balance: Money }[] }
-interface Org { id: string; name: string; legalName: string; trn: string; currency: string; financialYearStart: number; openingDate: string; status: string; role: keyof typeof ROLE_LABEL }
+interface Org { id: string; name: string; legalName: string; trn: string; currency: string; financialYearStart: number; openingDate: string; status: string; role: keyof typeof ROLE_LABEL; journalApprovalRequired: boolean }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -62,7 +63,8 @@ function OrgProfile(props: CapabilityPanelProps) {
   const { orgId, refreshWorkspace } = useWorkspaceTools();
   const org = useData<Org>(`/api/orgs/${orgId}`);
   const { run, busy } = useAction(props);
-  const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
+  const [flash, setFlash] = useFlash(`profile:${orgId}`);
+  const feedback = flash?.f ?? null;
   const canEdit = hasAction(props, 'org.profile.update');
   if (org.loading) return <Loading />;
   if (!org.data) return <ErrorText message={org.error ?? 'Could not load.'} />;
@@ -74,21 +76,26 @@ function OrgProfile(props: CapabilityPanelProps) {
     const result = await run('org.profile.update', {
       name: String(f.get('name')), legalName: String(f.get('legalName')), trn: String(f.get('trn')), financialYearStart: Number(f.get('financialYearStart')),
     });
-    if (result) setFeedback(result);
+    if (result) setFlash({ f: result, success: 'Profile saved.' }, result.ok);
     if (result?.ok) refreshWorkspace();
   }
 
+  const controls = <ApprovalControl props={props} org={o} onChanged={() => org.reload()} />;
   if (!canEdit) {
     return (
-      <dl className="panel details">
+      <div className="panel">
+      <dl className="details">
         <dt>Name</dt><dd>{o.name}</dd><dt>Legal name</dt><dd>{o.legalName}</dd><dt>TRN</dt><dd>{o.trn || '—'}</dd>
         <dt>Reporting currency</dt><dd>{o.currency}</dd><dt>Financial year starts</dt><dd>{MONTHS[o.financialYearStart - 1]}</dd>
         <dt>Books opened</dt><dd>{o.openingDate}</dd>
       </dl>
+      {controls}
+      </div>
     );
   }
   return (
-    <form className="panel form" onSubmit={submit}>
+    <div className="panel">
+    <form className="form" onSubmit={submit}>
       <label>Name<input name="name" defaultValue={o.name} required maxLength={200} /></label>
       <label>Legal name<input name="legalName" defaultValue={o.legalName} maxLength={200} /></label>
       <label>TRN<input name="trn" defaultValue={o.trn} maxLength={40} /></label>
@@ -99,6 +106,33 @@ function OrgProfile(props: CapabilityPanelProps) {
       <button type="submit" disabled={busy !== null}>{busy ? 'Saving…' : 'Save profile'}</button>
       <Notice feedback={feedback} success="Profile saved." />
     </form>
+    {controls}
+    </div>
+  );
+}
+
+/** Journal approval (maker-checker) for this client. Reviewers change it; everyone else sees it. */
+function ApprovalControl(props: { props: CapabilityPanelProps; org: Org; onChanged: () => void }) {
+  const { role } = useWorkspaceTools();
+  const { run, busy } = useAction(props.props);
+  const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
+  if (role === 'client_viewer') return null;
+  const on = props.org.journalApprovalRequired;
+  async function toggle() {
+    const result = await run('org.controls.update', { journalApprovalRequired: !on });
+    if (!result) return;
+    setFeedback(result);
+    if (result.ok) props.onChanged();
+  }
+  return (
+    <section className="control">
+      <h3>Journal approval</h3>
+      <p>{on ? 'On: every journal needs a reviewer\'s approval before it can be posted. The approver must be someone other than the preparer.' : 'Off: accountants post journals directly.'}</p>
+      {hasAction(props.props, 'org.controls.update') && (
+        <button type="button" className="secondary" disabled={busy !== null} onClick={() => void toggle()}>{on ? 'Turn approval off' : 'Turn approval on'}</button>
+      )}
+      <Notice feedback={feedback} success={`Journal approval is now ${on ? 'on' : 'off'}.`} />
+    </section>
   );
 }
 
@@ -249,7 +283,7 @@ function AccountLedger(props: CapabilityPanelProps) {
   const accountId = props.snapshot.object.reference.objectId;
   const [from, setFrom] = useState(`${new Date().getUTCFullYear()}-01-01`);
   const [to, setTo] = useState(today());
-  const ledger = useData<{ account: Account; lines: { entryId: string; entryDate: string; postingSequence: number; line: { side: 'debit' | 'credit'; amount: Money; memo?: string | null }; runningBalance: Money }[] }>(
+  const ledger = useData<{ account: Account; lines: { entryId: string; entryDate: string; postingSequence: number; description: string | null; line: { side: 'debit' | 'credit'; amount: Money; memo?: string | null }; runningBalance: Money }[] }>(
     `/api/orgs/${orgId}/accounts/${encodeURIComponent(accountId)}/ledger?from=${from}&to=${to}`);
   return (
     <div className="panel">
@@ -259,10 +293,11 @@ function AccountLedger(props: CapabilityPanelProps) {
       </div>
       {ledger.loading ? <Loading /> : ledger.error ? <ErrorText message={ledger.error} /> : !ledger.data?.lines.length ? <p className="muted">No postings in this range.</p> : (
         <table>
-          <thead><tr><th>Date</th><th>#</th><th>Memo</th><th className="num">Debit ({currency})</th><th className="num">Credit ({currency})</th><th className="num">Balance</th></tr></thead>
+          <thead><tr><th>Date</th><th>#</th><th>Journal</th><th className="num">Debit ({currency})</th><th className="num">Credit ({currency})</th><th className="num">Balance</th></tr></thead>
           <tbody>{ledger.data.lines.map((l) => (
             <tr key={`${l.entryId}-${l.postingSequence}-${l.line.side}-${l.line.amount.amount}`}>
-              <td>{l.entryDate}</td><td>{l.postingSequence}</td><td>{l.line.memo ?? ''}</td>
+              <td>{l.entryDate}</td><td>{l.postingSequence}</td>
+              <td><Link to={workspacePath(orgId, 'journal', l.entryId)}>{l.description ?? 'Journal'}</Link>{l.line.memo && l.line.memo !== l.description && <div className="muted small">{l.line.memo}</div>}</td>
               <td className="num">{l.line.side === 'debit' ? formatMinor(l.line.amount.amount) : ''}</td>
               <td className="num">{l.line.side === 'credit' ? formatMinor(l.line.amount.amount) : ''}</td>
               <td className="num">{formatMinor(l.runningBalance.amount)}</td>
@@ -279,7 +314,7 @@ function AccountDetails(props: CapabilityPanelProps) {
   const accountId = props.snapshot.object.reference.objectId;
   const accounts = useData<{ accounts: Account[] }>(`/api/orgs/${orgId}/accounts`);
   const { run, busy } = useAction(props);
-  const [feedback, setFeedback] = useState<{ f: ActionFeedback; success: string } | null>(null);
+  const [feedback, setFeedback] = useFlash(`account:${accountId}`);
   const account = accounts.data?.accounts.find((a) => a.accountId === accountId);
   if (accounts.loading) return <Loading />;
   if (!account) return <ErrorText message={accounts.error ?? 'Account not found.'} />;
@@ -294,12 +329,12 @@ function AccountDetails(props: CapabilityPanelProps) {
     if (classification && classification !== (account!.classification ?? '')) input.classification = classification;
     if (!Object.keys(input).length) { setFeedback({ f: { ok: true }, success: 'Nothing to change.' }); return; }
     const result = await run('account.update', input);
-    if (result) setFeedback({ f: result, success: 'Account saved.' });
+    if (result) setFeedback({ f: result, success: 'Account saved.' }, result.ok);
     if (result?.ok) { accounts.reload(); refreshWorkspace(); }
   }
   async function deactivate() {
     const result = await run('account.deactivate', {});
-    if (result) setFeedback({ f: result, success: 'Account deactivated.' });
+    if (result) setFeedback({ f: result, success: 'Account deactivated.' }, result.ok);
     if (result?.ok) { accounts.reload(); refreshWorkspace(); }
   }
 
@@ -353,4 +388,7 @@ export const PANELS: CapabilityPanels = {
   'account/details': AccountDetails,
   'period/status': PeriodStatus,
   'period/trial-balance': PeriodTrialBalance,
+  'client-organisation/journals': ClientJournals,
+  'journal/lines': JournalLines,
+  'journal/review': JournalReview,
 };

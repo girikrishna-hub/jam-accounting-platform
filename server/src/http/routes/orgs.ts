@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { notFound } from '../errors.ts';
 import { requireAllowed } from '../../access/checks.ts';
 import { orgScope, scopeOf, type AppContext } from '../middleware.ts';
+import { ensureOpeningRegistered, getJournal, listJournals, VISIBLE_TO_CLIENT, type JournalStatus } from '../../services/journals.ts';
+import { journalVisible } from '../../workspace/objects.ts';
+
+const STATUSES = ['draft', 'submitted', 'returned', 'approved', 'posted', 'discarded', 'reversed'] as const;
 
 const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -22,6 +26,7 @@ export function orgRoutes(ctx: AppContext): Router {
     res.json({
       id: org.id, name: org.name, legalName: org.legal_name, trn: org.trn, country: org.country, currency: org.currency,
       financialYearStart: org.financial_year_start, openingDate: org.opening_date, status: org.status, role,
+      journalApprovalRequired: org.journal_approval_required,
     });
   });
 
@@ -48,7 +53,65 @@ export function orgRoutes(ctx: AppContext): Router {
     const account = accounts.find((a) => a.accountId === accountId);
     if (!account) throw notFound();
     const lines = await ctx.ledger.getAccountLedger(scope.actor, accountId, from, to);
-    res.json({ account, from, to, currency: scope.org.currency, lines });
+    // Journal descriptions from the register, so each line says what it was for and links to its journal.
+    const journals = await ctx.db.query<{ entry_id: string; description: string }>(
+      'SELECT entry_id, description FROM app.journals WHERE org_id = $1 AND entry_id = ANY($2)', [scope.org.id, [...new Set(lines.map((l) => l.entryId))]]);
+    const described = new Map(journals.rows.map((j) => [j.entry_id, j.description]));
+    res.json({ account, from, to, currency: scope.org.currency, lines: lines.map((l) => ({ ...l, description: described.get(l.entryId) ?? null })) });
+  });
+
+  r.get('/journals', async (req, res) => {
+    const scope = scopeOf(res);
+    await clientCapability(ctx, res, 'journals');
+    await ensureOpeningRegistered(ctx.db, ctx.ledger, scope);
+    const wanted = z.array(z.enum(STATUSES)).optional().parse(typeof req.query.status === 'string' && req.query.status ? req.query.status.split(',') : undefined);
+    // Client viewers only ever see posted journals and reversals, whatever they ask for.
+    const statuses: readonly JournalStatus[] | undefined = scope.role === 'client_viewer'
+      ? (wanted ?? VISIBLE_TO_CLIENT).filter((st) => VISIBLE_TO_CLIENT.includes(st))
+      : wanted;
+    const rows = await listJournals(ctx.db, scope.org.id, statuses);
+    const names = await peopleNames(ctx, rows.flatMap((r) => [r.created_by, r.submitted_by, r.reviewed_by, r.posted_by]));
+    res.json({
+      currency: scope.org.currency,
+      journalApprovalRequired: scope.org.journal_approval_required,
+      journals: rows.map((r) => ({
+        entryId: r.entry_id, kind: r.kind, status: r.status, entryDate: r.entry_date, description: r.description, total: r.total_minor,
+        postingSequence: r.posting_sequence, preparedBy: name(names, r.created_by), submittedBy: name(names, r.submitted_by),
+        reviewedBy: name(names, r.reviewed_by), postedBy: name(names, r.posted_by), reviewNote: scope.role === 'client_viewer' ? null : r.review_note,
+      })),
+    });
+  });
+
+  r.get('/journals/:entryId', async (req, res) => {
+    const scope = scopeOf(res);
+    const entryId = z.string().max(128).parse(req.params.entryId);
+    await requireAllowed(ctx, scope, 'journal', entryId, 'capability.lines.view');
+    const row = await getJournal(ctx.db, scope.org.id, entryId);
+    if (!row || !journalVisible(scope, row)) throw notFound();
+    const [entry, accounts] = await Promise.all([ctx.ledger.getEntry(scope.actor, entryId), ctx.ledger.listAccounts(scope.actor)]);
+    const byId = new Map(accounts.map((a) => [a.accountId, a]));
+    const names = await peopleNames(ctx, [row.created_by, row.updated_by, row.submitted_by, row.reviewed_by, row.posted_by]);
+    const staff = scope.role !== 'client_viewer';
+    res.json({
+      currency: scope.org.currency,
+      journalApprovalRequired: scope.org.journal_approval_required,
+      journal: {
+        entryId, kind: row.kind, status: row.status, ledgerState: entry.state, entryDate: entry.entryDate, description: entry.description,
+        reference: entry.externalReference ?? null, postingSequence: entry.postingSequence ?? null,
+        reversalOf: entry.reversalOf ?? null, reversedBy: entry.reversedBy ?? null,
+        lines: entry.lines.map((l) => ({
+          lineNumber: l.lineNumber, accountId: l.accountId, accountCode: byId.get(l.accountId)?.code ?? '', accountName: byId.get(l.accountId)?.name ?? '',
+          side: l.side, amount: l.amount.amount, memo: l.memo ?? null,
+        })),
+        people: staff ? {
+          preparedBy: name(names, row.created_by), preparedAt: row.created_at, lastEditedBy: name(names, row.updated_by),
+          submittedBy: name(names, row.submitted_by), submittedAt: row.submitted_at,
+          reviewedBy: name(names, row.reviewed_by), reviewedAt: row.reviewed_at, reviewNote: row.review_note,
+          postedBy: name(names, row.posted_by), postedAt: row.posted_at,
+          ids: { createdBy: row.created_by, updatedBy: row.updated_by, submittedBy: row.submitted_by },
+        } : null,
+      },
+    });
   });
 
   r.get('/periods', async (_req, res) => {
@@ -90,4 +153,15 @@ export function orgRoutes(ctx: AppContext): Router {
   });
 
   return r;
+}
+
+async function peopleNames(ctx: AppContext, ids: (string | null)[]): Promise<Map<string, string>> {
+  const wanted = [...new Set(ids.filter((v): v is string => Boolean(v)))];
+  if (!wanted.length) return new Map();
+  const r = await ctx.db.query<{ id: string; display_name: string }>('SELECT id, display_name FROM app.users WHERE id = ANY($1)', [wanted]);
+  return new Map(r.rows.map((u) => [u.id, u.display_name]));
+}
+
+function name(names: Map<string, string>, id: string | null): string | null {
+  return id ? names.get(id) ?? 'Former user' : null;
 }

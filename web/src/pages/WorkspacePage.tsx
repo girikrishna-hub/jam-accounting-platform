@@ -7,6 +7,8 @@ import { PANELS } from '../workspace/panels.tsx';
 import { WorkspaceToolsProvider } from '../workspace/tools.tsx';
 import { workspacePath } from '../../../shared/workspace-model.ts';
 
+const TYPE_LABEL: Record<string, string> = { account: 'Account', period: 'Period', journal: 'Journal' };
+
 /** Opens one object workspace from a deep link. The server re-resolves and re-authorises it. */
 export function WorkspacePage(props: { orgId: string; objectTypeId: string; objectId: string; capabilityId?: string }) {
   const { me } = useApp();
@@ -39,7 +41,7 @@ export function WorkspacePage(props: { orgId: string; objectTypeId: string; obje
       <nav className="breadcrumb" aria-label="Breadcrumb">
         <Link to="/">Clients</Link> ›{' '}
         <Link to={workspacePath(org.id, 'client-organisation', org.id)}>{org.name}</Link>
-        {props.objectTypeId !== 'client-organisation' && <> › {props.objectTypeId === 'account' ? 'Account' : 'Period'}</>}
+        {props.objectTypeId !== 'client-organisation' && <> › {TYPE_LABEL[props.objectTypeId] ?? ''}</>}
       </nav>
       <CowrProvider runtime={workspaceRuntime}>
         <CowrWorkspace

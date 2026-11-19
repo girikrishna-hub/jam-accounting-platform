@@ -3,6 +3,7 @@ import type { AppContext, OrgScope } from '../http/middleware.ts';
 import { formatMinor } from '../domain/money.ts';
 import { isAllowed } from '../access/checks.ts';
 import type { ResourceType } from '../access/authority.ts';
+import { VISIBLE_TO_CLIENT, getJournal, listJournals, type JournalRow } from '../services/journals.ts';
 
 export type MetadataValue = string | number | boolean | null;
 
@@ -16,7 +17,7 @@ export interface Projection {
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const ROLE_LABEL: Record<Role, string> = { accountant: 'Accountant', reviewer: 'Reviewer', client_viewer: 'Client viewer' };
 
-const OBJECT_TYPES = new Set(['client-organisation', 'account', 'period']);
+const OBJECT_TYPES = new Set(['client-organisation', 'account', 'period', 'journal']);
 
 /** Whether the Authorization Runtime lets this user open a workspace on this object. */
 export function mayOpen(ctx: AppContext, scope: OrgScope, objectTypeId: string, objectId: string): Promise<boolean> {
@@ -56,6 +57,11 @@ export async function resolveObject(ctx: AppContext, scope: OrgScope, objectType
       },
     };
   }
+  if (objectTypeId === 'journal') {
+    const row = await getJournal(ctx.db, org.id, objectId);
+    if (!row || !journalVisible(scope, row)) return null;
+    return journalProjection(org.currency, row);
+  }
   if (objectTypeId === 'period') {
     const period = (await ledger.listPeriods(scope.actor)).find((p) => p.periodId === objectId);
     if (!period) return null;
@@ -94,5 +100,31 @@ export async function searchObjects(ctx: AppContext, scope: OrgScope, query: str
       }
     }
   }
+  if (await wants('journal')) {
+    for (const row of await listJournals(ctx.db, scope.org.id)) {
+      if (results.length >= limit) break;
+      if (journalVisible(scope, row) && (row.description.toLowerCase().includes(q) || String(row.posting_sequence ?? '').startsWith(q))) {
+        results.push(journalProjection(scope.org.currency, row));
+      }
+    }
+  }
   return results.slice(0, limit);
+}
+
+const KIND_LABEL = { standard: 'Journal', opening: 'Opening balances', reversal: 'Reversal' } as const;
+const STATUS_LABEL = { draft: 'draft', submitted: 'awaiting approval', returned: 'returned', approved: 'approved', posted: 'posted', discarded: 'discarded', reversed: 'reversed' } as const;
+
+/** Client viewers see only posted journals and their reversals. */
+export function journalVisible(scope: OrgScope, row: JournalRow): boolean {
+  return scope.role !== 'client_viewer' || VISIBLE_TO_CLIENT.includes(row.status);
+}
+
+function journalProjection(currency: string, row: JournalRow): Projection {
+  return {
+    objectTypeId: 'journal', objectId: row.entry_id, displayName: row.description,
+    metadata: {
+      entryDate: row.entry_date, number: row.posting_sequence ? `#${row.posting_sequence}` : 'Not posted',
+      total: `${currency} ${formatMinor(row.total_minor)}`, kind: KIND_LABEL[row.kind], status: STATUS_LABEL[row.status],
+    },
+  };
 }

@@ -11,8 +11,8 @@ export const APPLICATION_ID = 'jam-accounting';
 export type Role = 'accountant' | 'reviewer' | 'client_viewer';
 export const ROLES: readonly Role[] = ['accountant', 'reviewer', 'client_viewer'];
 
-export type ObjectTypeId = 'client-organisation' | 'account' | 'period';
-export const OBJECT_TYPE_IDS: readonly ObjectTypeId[] = ['client-organisation', 'account', 'period'];
+export type ObjectTypeId = 'client-organisation' | 'account' | 'period' | 'journal';
+export const OBJECT_TYPE_IDS: readonly ObjectTypeId[] = ['client-organisation', 'account', 'period', 'journal'];
 
 export interface CapabilityModel {
   readonly capabilityId: string;
@@ -48,6 +48,7 @@ export interface ActionModel {
 const ALL: readonly Role[] = ROLES;
 const STAFF: readonly Role[] = ['accountant', 'reviewer'];
 const PREPARER: readonly Role[] = ['accountant'];
+const REVIEWER: readonly Role[] = ['reviewer'];
 
 export const OBJECT_TYPES: readonly ObjectTypeModel[] = [
   {
@@ -68,8 +69,9 @@ export const OBJECT_TYPES: readonly ObjectTypeModel[] = [
     statusFieldId: 'status',
     capabilities: [
       { capabilityId: 'overview', label: 'Overview', order: 10, roles: ALL, actionIds: [] },
-      { capabilityId: 'profile', label: 'Profile', order: 20, roles: ALL, actionIds: ['org.profile.update'] },
+      { capabilityId: 'profile', label: 'Profile', order: 20, roles: ALL, actionIds: ['org.profile.update', 'org.controls.update'] },
       { capabilityId: 'chart-of-accounts', label: 'Chart of accounts', order: 30, roles: ALL, actionIds: ['coa.import', 'opening-balances.post'] },
+      { capabilityId: 'journals', label: 'Journals', order: 35, roles: ALL, actionIds: ['journal.create'] },
       { capabilityId: 'periods', label: 'Periods', order: 40, roles: STAFF, actionIds: ['period.open'] },
       { capabilityId: 'trial-balance', label: 'Trial balance', order: 50, roles: ALL, actionIds: [] },
       { capabilityId: 'activity', label: 'Activity', order: 60, roles: ALL, actionIds: [] },
@@ -114,10 +116,39 @@ export const OBJECT_TYPES: readonly ObjectTypeModel[] = [
       { capabilityId: 'trial-balance', label: 'Trial balance', order: 20, roles: STAFF, actionIds: [] },
     ],
   },
+  {
+    objectTypeId: 'journal',
+    displayName: 'Journal',
+    version: '1.0.0',
+    defaultCapabilityId: 'lines',
+    metadataFields: [
+      { fieldId: 'entryDate', label: 'Date' },
+      { fieldId: 'number', label: 'Number' },
+      { fieldId: 'total', label: 'Total' },
+      { fieldId: 'kind', label: 'Kind' },
+      { fieldId: 'status', label: 'Status' },
+    ],
+    headerFieldIds: ['entryDate', 'number'],
+    summaryFieldIds: ['total', 'kind'],
+    statusFieldId: 'status',
+    capabilities: [
+      { capabilityId: 'lines', label: 'Lines', order: 10, roles: ALL, actionIds: ['journal.update', 'journal.submit', 'journal.approve', 'journal.return', 'journal.post', 'journal.discard', 'journal.reverse'] },
+      { capabilityId: 'review', label: 'Review trail', order: 20, roles: STAFF, actionIds: [] },
+    ],
+  },
 ];
 
 export const ACTIONS: readonly ActionModel[] = [
   { actionId: 'org.profile.update', label: 'Save profile', objectTypeId: 'client-organisation', capabilityId: 'profile', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'org.controls.update', label: 'Change journal approval', objectTypeId: 'client-organisation', capabilityId: 'profile', roles: REVIEWER, requiresConfirmation: true, category: 'control' },
+  { actionId: 'journal.create', label: 'Create journal', objectTypeId: 'client-organisation', capabilityId: 'journals', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'journal.update', label: 'Save journal', objectTypeId: 'journal', capabilityId: 'lines', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'journal.submit', label: 'Submit for approval', objectTypeId: 'journal', capabilityId: 'lines', roles: PREPARER, requiresConfirmation: false, category: 'workflow' },
+  { actionId: 'journal.approve', label: 'Approve journal', objectTypeId: 'journal', capabilityId: 'lines', roles: REVIEWER, requiresConfirmation: true, category: 'workflow' },
+  { actionId: 'journal.return', label: 'Return to preparer', objectTypeId: 'journal', capabilityId: 'lines', roles: REVIEWER, requiresConfirmation: false, category: 'workflow' },
+  { actionId: 'journal.post', label: 'Post journal', objectTypeId: 'journal', capabilityId: 'lines', roles: PREPARER, requiresConfirmation: true, category: 'post' },
+  { actionId: 'journal.discard', label: 'Discard draft', objectTypeId: 'journal', capabilityId: 'lines', roles: PREPARER, requiresConfirmation: true, category: 'edit' },
+  { actionId: 'journal.reverse', label: 'Reverse journal', objectTypeId: 'journal', capabilityId: 'lines', roles: PREPARER, requiresConfirmation: true, category: 'post' },
   { actionId: 'coa.import', label: 'Import chart of accounts', objectTypeId: 'client-organisation', capabilityId: 'chart-of-accounts', roles: PREPARER, requiresConfirmation: false, category: 'import' },
   { actionId: 'opening-balances.post', label: 'Post opening balances', objectTypeId: 'client-organisation', capabilityId: 'chart-of-accounts', roles: PREPARER, requiresConfirmation: true, category: 'post' },
   { actionId: 'period.open', label: 'Open next period', objectTypeId: 'client-organisation', capabilityId: 'periods', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
@@ -152,4 +183,4 @@ export function workspacePath(orgId: string, objectTypeId: string, objectId: str
   return '/' + parts.map(encodeURIComponent).join('/');
 }
 
-export const WORKSPACE_PATH_PATTERN = /^\/c\/([0-9a-f-]{36})\/(client-organisation|account|period)\/([A-Za-z0-9_.:-]{1,128})(?:\/([a-z-]{1,64}))?$/;
+export const WORKSPACE_PATH_PATTERN = /^\/c\/([0-9a-f-]{36})\/(client-organisation|account|period|journal)\/([A-Za-z0-9_.:-]{1,128})(?:\/([a-z-]{1,64}))?$/;
