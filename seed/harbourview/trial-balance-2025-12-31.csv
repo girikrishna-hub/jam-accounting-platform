@@ -1,0 +1,68 @@
+Account code,Account name,Debit (JMD),Credit (JMD)
+1000,Cash – NCB Operating Account (JMD),8452310.55,0.00
+1010,"Cash – Scotiabank Operating Account (USD, JMD equiv.)",3118400.00,0.00
+1020,Petty Cash,45000.00,0.00
+1050,Client Trust Account – NCB (Clients' Money),61380225.10,0.00
+1055,Client Trust Account – JN Bank (Conveyancing Escrow),24715000.00,0.00
+1100,Accounts Receivable – Fee Notes,31940880.00,0.00
+1110,Unbilled Work in Progress (WIP),12600000.00,0.00
+1120,Disbursements Recoverable from Clients,1985340.00,0.00
+1130,Provision for Doubtful Fees,0.00,2400000.00
+1140,Short-term Investment – Fixed Deposit (Sagicor Bank),47802779.45,0.00
+1150,Prepayments & Deposits,1320000.00,0.00
+1160,GCT Input Tax Recoverable,0.00,0.00
+1500,Office Furniture & Fittings – Cost,9800000.00,0.00
+1510,Computer Equipment – Cost,7250000.00,0.00
+1520,Motor Vehicles – Cost,14500000.00,0.00
+1530,Leasehold Improvements – Cost,11200000.00,0.00
+1590,Accumulated Depreciation,0.00,19640000.00
+2000,Accounts Payable – Suppliers,0.00,4215660.00
+2050,Client Trust Liability – Amounts Owed to Clients,0.00,86095225.10
+2100,GCT Payable (Output less Input),0.00,3612450.00
+2110,Statutory Payroll Deductions Payable (PAYE/NIS/NHT/Ed Tax/HEART),0.00,2184300.00
+2150,Accruals,0.00,1950000.00
+2200,Fees Received in Advance (Retainers),0.00,6400000.00
+2500,Bank Loan – Motor Vehicle (NCB),0.00,6850000.00
+3000,Capital Account – Partner A,0.00,22000000.00
+3010,Capital Account – Partner B,0.00,15000000.00
+3020,Capital Account – Partner C,0.00,8000000.00
+3100,Current Account – Partner A (opening),0.00,4120000.00
+3110,Current Account – Partner B (opening),0.00,2860000.00
+3120,Current Account – Partner C (opening),0.00,1340000.00
+3200,Drawings – Partner A,36000000.00,0.00
+3210,Drawings – Partner B,27600000.00,0.00
+3220,Drawings – Partner C,16800000.00,0.00
+4000,Fees – Conveyancing & Real Estate,0.00,78450000.00
+4010,Fees – Litigation & Dispute Resolution,0.00,64200000.00
+4020,Fees – Corporate & Commercial,0.00,52780000.00
+4030,Fees – Probate & Estate Administration,0.00,31600000.00
+4040,Fees – Family & Matrimonial,0.00,12350000.00
+4050,"Fees – Notarial, Immigration & Ancillary",0.00,6870000.00
+4100,Retainer / Advisory Fees (Corporate Clients),0.00,18000000.00
+4200,Movement in Unbilled WIP,0.00,2100000.00
+4500,Interest Income – Operating & Client Accounts,0.00,1860000.00
+4510,Foreign Exchange Gain,0.00,412300.00
+5000,Salaries – Associates,48600000.00,0.00
+5010,Salaries – Paralegals & Support Staff,26400000.00,0.00
+5020,Employer Statutory Contributions (NIS/NHT/Ed Tax/HEART),8870000.00,0.00
+5030,Staff Health Insurance & Pension,4150000.00,0.00
+5040,Staff Training & CPD,960000.00,0.00
+5100,Rent – Office (New Kingston),14400000.00,0.00
+5110,Electricity (JPS),3960000.00,0.00
+5120,Water (NWC),420000.00,0.00
+5130,Security & Janitorial,2280000.00,0.00
+5140,Repairs & Maintenance,1150000.00,0.00
+5200,Professional Indemnity Insurance,4800000.00,0.00
+5210,Practising Certificates & Bar Subscriptions (GLC / JBA),780000.00,0.00
+5220,Legal Research Subscriptions & Law Reports,1640000.00,0.00
+5230,Court Filing Fees (non-recoverable),310000.00,0.00
+5300,Telephone & Internet (Flow / Digicel),2160000.00,0.00
+5310,Software & IT Support (incl. Sage 50 licence),2740000.00,0.00
+5320,"Stationery, Printing & Courier",1380000.00,0.00
+5330,Motor Vehicle Expenses,2050000.00,0.00
+5340,Marketing & Business Development,1200000.00,0.00
+5350,Audit & Accountant's Report Fees,1650000.00,0.00
+5400,Bank Charges,690000.00,0.00
+5410,Loan Interest – Motor Vehicle,820000.00,0.00
+5500,Depreciation,5920000.00,0.00
+5510,Bad & Doubtful Fees Written Off,1450000.00,0.00

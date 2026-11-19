@@ -17,13 +17,54 @@ A cloud accounting platform operated by an accounting firm. The firm's accountan
   - `@governedai-labs/financial-statements-runtime` 1.0.1: profit and loss, balance sheet, issued statements
   - `@governedai-labs/cowr-runtime` and `@governedai-labs/cowr-react` 1.0.0: object workspaces
 
-## Replit secrets (needed once the app code lands)
+## Replit secrets
 
-| Secret | Purpose |
+| Secret | Required | Purpose |
+| --- | --- | --- |
+| `GH_PACKAGES_TOKEN` | Yes | GitHub token with `read:packages`, used by `.npmrc` to install `@governedai-labs` packages |
+| `DATABASE_URL` | Yes | PostgreSQL connection string (Replit provides this when a database is added) |
+| `DECISION_SIGNING_KEY` | Yes | Random string of at least 32 characters; signs the server's authorization decisions |
+| `SEED_DEMO` | Optional | `1` loads the fictitious Harbourview Chambers demo at start-up (skips anything already loaded) |
+| `DEMO_PASSWORD` | With `SEED_DEMO` | One password for every demo user: 12+ characters with upper case, lower case and a digit |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Optional | Create the first firm administrator at start-up when none exists |
+
+## Running
+
+| Command | What it does |
 | --- | --- |
-| `GH_PACKAGES_TOKEN` | GitHub token with `read:packages`, used by `.npmrc` to install `@governedai-labs` packages |
-| `DATABASE_URL` | PostgreSQL connection string (Replit provides this when a database is added) |
-| `DECISION_SIGNING_KEY` | Random string of at least 32 characters; signs the server's authorization decisions |
+| `npm install` | Installs server and web dependencies (needs `GH_PACKAGES_TOKEN`) |
+| `npm run build` | Builds the web app into `web/dist` |
+| `npm run start` | Applies database migrations and serves the API and web app on `PORT` (default 3000) |
+| `npm run test` | Server tests; set `TEST_DATABASE_URL` to an empty database to include the acceptance tests |
+| `npm run typecheck` | Type checks server and web |
+| `npm run seed:demo` | Loads the demo data (needs `DEMO_PASSWORD`) |
+
+## Demo users (with `SEED_DEMO=1`)
+
+All use `DEMO_PASSWORD`.
+
+| Email | Role |
+| --- | --- |
+| `admin@demo.firm` | Firm administrator |
+| `accountant@demo.firm` | Accountant for both demo clients |
+| `reviewer@demo.firm` | Reviewer for Harbourview Chambers |
+| `owner@harbourview.demo` | Client viewer, Harbourview Chambers only |
+| `owner@bluemountain.demo` | Client viewer, Blue Mountain Traders only |
+
+All demo data is fictitious (from the Jamaica sample data pack in `seed/harbourview`).
+
+## Code layout
+
+| Path | Contents |
+| --- | --- |
+| `shared/workspace-model.ts` | Objects, capabilities, actions and who may use them (enforced by the server) |
+| `server/src/access` | Ledger operation policy and signed authorization decisions |
+| `server/src/ledger/gateway.ts` | The only path to the Bookkeeping runtime |
+| `server/src/services` | Clients, users, chart of accounts, periods, opening balances |
+| `server/src/workspace` | Object resolution, search and action execution for the workspaces |
+| `server/src/http` | API routes, sessions, isolation checks |
+| `web/src` | React app: sign-in, clients list, administration, object workspaces and panels |
+| `docs/engineering` | Internal design record and platform feedback |
 
 ## Build slices
 
