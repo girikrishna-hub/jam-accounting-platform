@@ -112,3 +112,22 @@ export function readFileText(file: File): Promise<string> {
 }
 
 export const ROLE_LABEL = { accountant: 'Accountant', reviewer: 'Reviewer', client_viewer: 'Client viewer' } as const;
+
+/**
+ * Feedback that survives the workspace reopening after an action (refreshWorkspace remounts
+ * the panels so the header shows the new status). Keyed by object and panel.
+ */
+const flashes = new Map<string, { f: ActionFeedback; success: string }>();
+
+export function useFlash(key: string): [{ f: ActionFeedback; success: string } | null, (value: { f: ActionFeedback; success: string } | null, persist?: boolean) => void] {
+  const [value, setValue] = useState(() => {
+    const v = flashes.get(key) ?? null;
+    flashes.delete(key);
+    return v;
+  });
+  const set = useCallback((v: { f: ActionFeedback; success: string } | null, persist = false) => {
+    if (persist && v) flashes.set(key, v);
+    setValue(v);
+  }, [key]);
+  return [value, set];
+}
