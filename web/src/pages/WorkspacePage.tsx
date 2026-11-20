@@ -7,6 +7,7 @@ import { PANELS } from '../workspace/panels.tsx';
 import { WorkspaceToolsProvider } from '../workspace/tools.tsx';
 import { workspacePath } from '../../../shared/workspace-model.ts';
 
+const confirmedByPanel = async () => true;
 const TYPE_LABEL: Record<string, string> = { account: 'Account', period: 'Period', journal: 'Journal' };
 
 /** Opens one object workspace from a deep link. The server re-resolves and re-authorises it. */
@@ -49,6 +50,10 @@ export function WorkspacePage(props: { orgId: string; objectTypeId: string; obje
           object={object}
           actor={actor}
           panels={PANELS}
+          // Panels hold every control; actions are registered as panel-only.
+          showActionBar={false}
+          // Panels ask for confirmation themselves before invoking (see useAction).
+          confirmAction={confirmedByPanel}
           {...(initialCapability ? { initialCapabilityId: initialCapability } : {})}
         />
       </CowrProvider>

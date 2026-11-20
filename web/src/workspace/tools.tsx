@@ -3,7 +3,6 @@ import type { CapabilityPanelProps } from '@governedai-labs/cowr-react';
 import type { ActorContext } from '@governedai-labs/cowr-runtime';
 import { api, ApiError } from '../api.ts';
 import { takeFeedback, type ActionFeedback } from './feedback.ts';
-import { workspaceRuntime } from './runtime.ts';
 
 export interface WorkspaceTools {
   actor: ActorContext;
@@ -47,14 +46,10 @@ export function hasAction(props: CapabilityPanelProps, actionId: string): boolea
 /**
  * Runs a workspace action through the workspace runtime (access check, input validation,
  * audit, then the server executor) with a fresh idempotency key, and returns the outcome.
- *
- * Panels call the runtime directly rather than the React adapter's onInvokeAction because the
- * adapter (cowr-react 1.0.0) replaces the whole workspace with an error page when an action
- * fails; a rejected import file should show its line errors in place instead. Recorded as
- * platform feedback in docs/engineering/platform-feedback.md.
+ * The panel shows the outcome itself (for example an import file's line errors), so the
+ * React adapter's inline message is switched off (cowr-react 1.1.0, showFailure: false).
  */
 export function useAction(props: CapabilityPanelProps) {
-  const { actor } = useWorkspaceTools();
   const [busy, setBusy] = useState<string | null>(null);
   const run = useCallback(async (actionId: string, input: unknown): Promise<ActionFeedback | undefined> => {
     const action = props.snapshot.actions.find((a) => a.actionId === actionId);
@@ -63,7 +58,7 @@ export function useAction(props: CapabilityPanelProps) {
     const key = crypto.randomUUID();
     setBusy(actionId);
     try {
-      const result = await workspaceRuntime.invokeAction(props.snapshot.context.contextId, actionId, actor, input, key, true);
+      const result = await props.onInvokeAction(actionId, input, key, { showFailure: false });
       const recorded = takeFeedback(key);
       if (recorded) return recorded;
       if (!result.ok) return { ok: false, message: COWR_MESSAGES[result.error.code] ?? 'The action could not be completed.' };
@@ -71,7 +66,7 @@ export function useAction(props: CapabilityPanelProps) {
     } finally {
       setBusy(null);
     }
-  }, [props.snapshot, actor]);
+  }, [props.onInvokeAction, props.snapshot]);
   return { run, busy };
 }
 

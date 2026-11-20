@@ -9,8 +9,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@governedai-labs/cowr-react": "1.0.0",
-    "@governedai-labs/cowr-runtime": "1.0.0",
+    "@governedai-labs/cowr-react": "1.1.0",
+    "@governedai-labs/cowr-runtime": "1.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
