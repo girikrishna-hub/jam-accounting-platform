@@ -18,6 +18,8 @@ import { resolveScope, userOf, type AppContext } from '../middleware.ts';
  */
 
 export const POLICY_VERSION = 'jam-access-2026-11-19.1';
+/** How long a workspace access decision stays fresh after the browser receives it. */
+const DECISION_LIFETIME_MS = 20_000;
 
 const Id = z.string().min(1).max(128).regex(/^[A-Za-z0-9_.:-]+$/);
 const ObjectRef = z.object({
@@ -52,11 +54,16 @@ function checkActor(ctx: AppContext, user: SessionUser, actor: z.infer<typeof Ac
 export function workspaceRoutes(ctx: AppContext): Router {
   const r = Router();
 
-  /** AccessDecisionPort. Returns ALLOW or DENY with a reason; the browser binds it to the request. */
+  /**
+   * AccessDecisionPort. Returns ALLOW or DENY with a reason; the browser binds it to the request.
+   * evaluatedAt/validUntil are on the server clock; the browser runtime uses only their difference
+   * (the decision's lifetime), timed from receipt (cowr-runtime 1.1.0 decisionTiming 'RECEIPT').
+   */
   r.post('/access', async (req, res) => {
     const request = AccessRequest.parse(req.body);
     const user = userOf(res);
-    const deny = (reasonCode: string) => res.json({ outcome: 'DENY', decisionReference: randomUUID(), policyVersion: POLICY_VERSION, reasonCode });
+    const stamp = () => { const evaluatedAt = Date.now(); return { evaluatedAt, validUntil: evaluatedAt + DECISION_LIFETIME_MS }; };
+    const deny = (reasonCode: string) => res.json({ outcome: 'DENY', decisionReference: randomUUID(), policyVersion: POLICY_VERSION, reasonCode, ...stamp() });
     const actorProblem = checkActor(ctx, user, request.actor, request.object);
     if (actorProblem) return deny(actorProblem);
     let scope;
@@ -73,7 +80,7 @@ export function workspaceRoutes(ctx: AppContext): Router {
     if (!(await isAllowed(ctx, scope, objectTypeId as ResourceType, objectId, action))) return deny('ROLE_NOT_PERMITTED');
     // Except for search, the object must exist inside this client (read from authoritative records).
     if (request.purpose !== 'OBJECT_SEARCH' && !(await resolveObject(ctx, scope, objectTypeId, objectId))) return deny('OBJECT_NOT_IN_SCOPE');
-    res.json({ outcome: 'ALLOW', decisionReference: randomUUID(), policyVersion: POLICY_VERSION });
+    res.json({ outcome: 'ALLOW', decisionReference: randomUUID(), policyVersion: POLICY_VERSION, ...stamp() });
   });
 
   /** ObjectSourcePort.resolve */

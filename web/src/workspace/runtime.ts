@@ -54,7 +54,8 @@ function buildRegistries() {
       defaultCapabilityId: t.defaultCapabilityId,
       identity: { key: 'objectId' },
       search: { enabled: t.objectTypeId !== 'client-organisation', adapterId: 'jam-server-search' },
-      presentation: { headerLayout: 'stacked', summaryColumns: 3, ...(t.statusFieldId ? { statusFieldId: t.statusFieldId } : {}) },
+      // Internal object IDs mean nothing to accountants; the deep link carries identity.
+      presentation: { headerLayout: 'stacked', summaryColumns: 3, showObjectId: false, ...(t.statusFieldId ? { statusFieldId: t.statusFieldId } : {}) },
     });
     if (!registered.ok) throw new Error(`Workspace definition ${t.objectTypeId} is invalid: ${registered.error.message}`);
   }
@@ -76,6 +77,8 @@ function buildRegistries() {
       auditMode: 'BEST_EFFORT',
       category: a.category,
       requiresConfirmation: a.requiresConfirmation,
+      // Every action needs input from its panel (files, forms), so none is offered on the generic action bar.
+      invocation: 'PANEL',
     });
     if (!registered.ok) throw new Error(`Action ${a.actionId} is invalid: ${registered.error.message}`);
   }
@@ -85,15 +88,15 @@ function buildRegistries() {
 const accessPort: AccessDecisionPort = {
   async evaluate(request) {
     try {
-      const r = await api.post<{ outcome: 'ALLOW' | 'DENY'; decisionReference: string; policyVersion: string; reasonCode?: string }>('/api/workspace/access', request);
+      const r = await api.post<{ outcome: 'ALLOW' | 'DENY'; decisionReference: string; policyVersion: string; reasonCode?: string; evaluatedAt: number; validUntil: number }>('/api/workspace/access', request);
       // The server is the authority; the decision is bound here to the exact request it answered.
-      const now = Date.now();
+      // Its timestamps are on the server clock: the runtime uses only their difference, from receipt.
       const decision: AccessDecision = {
         outcome: r.outcome,
         decisionReference: r.decisionReference,
         policyVersion: r.policyVersion,
-        evaluatedAt: now,
-        validUntil: now + 20_000,
+        evaluatedAt: r.evaluatedAt,
+        validUntil: r.validUntil,
         ...(r.reasonCode ? { reasonCode: r.reasonCode } : {}),
         binding: {
           actor: request.actor,
@@ -222,6 +225,8 @@ export const workspaceRuntime = new WorkspaceRuntime({
   executor: executorPort,
   navigation: navigationPort,
   audit: auditPort,
+  // Decisions come from the server; time them from receipt so browser clock skew cannot matter.
+  decisionTiming: 'RECEIPT',
 });
 
 export function objectRef(firmId: string, orgId: string, objectTypeId: string, objectId: string): ObjectReference {
