@@ -204,20 +204,26 @@ describe.skipIf(!TEST_DATABASE_URL)('slice 3a: receivables', () => {
     expect(r.receipts.find((x: { id: string }) => x.id === unknown.id)).toMatchObject({ unidentified: false, customerName: 'Client 0388' });
     expect(r.control.difference).toBe('0');
 
-    // A January payment of a 2025 fee note settles the brought-forward balance.
+    // A January payment of a 2025 fee note settles the brought-forward balance; the payer is in the reference.
     const bfCustomer = r.customers.find((c: { kind: string }) => c.kind === 'brought_forward');
-    const carib = (await ok(accountant, 'customer.create', orgRef, { name: 'Carib Distributors Ltd' })).id;
-    void bfCustomer;
-    const pay = await ok(accountant, 'receipt.record', orgRef, { customerId: carib, receiptDate: '2026-01-02', method: 'RTGS', depositAccount: '1000', amount: '1,725,000.00', reference: 'FN-2025-1188' });
-    expect(pay.number).toMatch(/^RC-26-/);
-    expect((await receivables()).control.difference).toBe('0');
+    const bfNote = r.feeNotes.find((n: { broughtForward: boolean }) => n.broughtForward);
+    const pay = await ok(accountant, 'receipt.record', orgRef, {
+      customerId: bfCustomer.id, receiptDate: '2026-01-02', method: 'RTGS', depositAccount: '1000', amount: '1,725,000.00',
+      reference: 'Carib Distributors Ltd – FN-2025-1188', allocateTo: bfNote.id,
+    });
+    expect(pay.allocated).toBeTruthy();
+    r = await receivables();
+    expect(r.feeNotes.find((n: { broughtForward: boolean }) => n.broughtForward).outstanding).toBe(String(3194088000n - 172500000n));
+    expect(r.control.difference).toBe('0');
+    // A retainer cannot be taken against the brought-forward balance.
+    expect((await act(accountant, 'receipt.record', orgRef, { customerId: bfCustomer.id, kind: 'retainer', receiptDate: '2026-01-02', method: 'RTGS', depositAccount: '1000', amount: '1.00' })).body.error).toBe('CUSTOMER_NOT_FOUND');
   });
 
   it('ages outstanding fee notes and shows unallocated payments', async () => {
     const a = (await accountant.get(url('/receivables/ageing?asOf=2026-03-15'))).body;
     expect(a.buckets.map((b: { key: string }) => b.key)).toEqual(['current', 'd31', 'd61', 'd90']);
     const bf = a.rows.find((row: { customerName: string }) => row.customerName.startsWith('Balances brought forward'));
-    expect(bf.buckets.d61).toBe('3194088000');
+    expect(bf.buckets.d61).toBe(String(3194088000n - 172500000n));
     const c0388 = a.rows.find((row: { customerName: string }) => row.customerName === 'Client 0388');
     expect(BigInt(c0388.unallocated)).toBeGreaterThan(0n);
     const r = await receivables();

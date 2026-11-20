@@ -448,7 +448,11 @@ export async function recordReceipt(ctx: Ctx, scope: OrgScope, raw: unknown) {
   let customer: CustomerRow | null;
   if (input.customerId) {
     customer = await getCustomer(ctx.db, scope.org.id, input.customerId);
-    if (!customer || customer.kind !== 'customer') throw new BusinessRuleError('CUSTOMER_NOT_FOUND', 'Choose a customer.');
+    // Payments of fee notes from before the system settle the brought-forward balance;
+    // the payer is named in the reference.
+    if (!customer || customer.kind === 'unidentified' || (customer.kind === 'brought_forward' && input.kind !== 'payment')) {
+      throw new BusinessRuleError('CUSTOMER_NOT_FOUND', 'Choose a customer.');
+    }
   } else {
     if (input.kind === 'retainer') throw new BusinessRuleError('CUSTOMER_REQUIRED', 'A retainer needs a customer.');
     customer = await specialCustomer(ctx.db, scope.org.id, 'unidentified');
