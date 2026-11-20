@@ -8,6 +8,9 @@ import {
   type AccountType,
   type AccountView,
   type AuditRecordView,
+  type EntryKind,
+  type EntryState,
+  type EntrySummary,
   type EntryView,
   type LedgerView,
   type LineInput,
@@ -159,7 +162,7 @@ export class LedgerGateway {
     return this.runtime.draftEntry({ ...await this.command(a, 'bookkeeping.DraftEntry', requestId), ...input });
   }
 
-  async updateDraft(a: LedgerActor, input: { entryId: string; entryDate: string; description: string; externalReference?: string; lines: LineInput[] }): Promise<EntryView> {
+  async updateDraft(a: LedgerActor, input: { entryId: string; entryDate: string; description: string; externalReference?: string; lines: LineInput[]; expectedVersion?: number }): Promise<EntryView> {
     return this.runtime.updateDraft({ ...await this.command(a, 'bookkeeping.UpdateDraft'), ...input });
   }
 
@@ -167,8 +170,9 @@ export class LedgerGateway {
     return this.runtime.discardDraft({ ...await this.command(a, 'bookkeeping.DiscardDraft'), entryId });
   }
 
-  async postEntry(a: LedgerActor, entryId: string, requestId?: string): Promise<EntryView> {
-    return this.runtime.postEntry({ ...await this.command(a, 'bookkeeping.PostEntry', requestId), entryId });
+  /** With expectedVersion the runtime posts only that version of the entry, else Conflict ENTRY_VERSION_MISMATCH (BR-28). */
+  async postEntry(a: LedgerActor, entryId: string, requestId?: string, expectedVersion?: number): Promise<EntryView> {
+    return this.runtime.postEntry({ ...await this.command(a, 'bookkeeping.PostEntry', requestId), entryId, ...(expectedVersion != null ? { expectedVersion } : {}) });
   }
 
   async reverseEntry(a: LedgerActor, input: { entryId: string; reversalDate: string; reason: string }, requestId?: string): Promise<EntryView> {
@@ -179,11 +183,9 @@ export class LedgerGateway {
     return this.runtime.getEntry({ ...await this.query(a, 'bookkeeping.GetEntry'), entryId });
   }
 
-  /** The opening journal's entry ID, if posted (always posting sequence 1). */
-  async openingEntryId(a: LedgerActor): Promise<string | null> {
-    const page = await this.runtime.getPostedLines({ ...await this.query(a, 'bookkeeping.GetPostedLines'), fromSequence: 1, toSequence: 1 });
-    const line = page.items.find((l) => l.entryKind === 'opening');
-    return line ? line.entryId : null;
+  /** Every entry of the ledger as a summary (no lines), in entry-date then creation order. */
+  listEntries(a: LedgerActor, filter: { states?: EntryState[]; kinds?: EntryKind[]; fromDate?: string; toDate?: string } = {}): Promise<EntrySummary[]> {
+    return this.all(async (cursor) => this.runtime.listEntries({ ...await this.query(a, 'bookkeeping.ListEntries'), ...filter, cursor }));
   }
 
   // ---- Reporting reads ----

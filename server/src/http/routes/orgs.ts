@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { notFound } from '../errors.ts';
 import { requireAllowed } from '../../access/checks.ts';
 import { orgScope, scopeOf, type AppContext } from '../middleware.ts';
-import { ensureOpeningRegistered, getJournal, listJournals, VISIBLE_TO_CLIENT, type JournalStatus } from '../../services/journals.ts';
+import { registerMissingEntries, getJournal, listJournals, VISIBLE_TO_CLIENT, type JournalStatus } from '../../services/journals.ts';
 import { journalVisible } from '../../workspace/objects.ts';
 
 const STATUSES = ['draft', 'submitted', 'returned', 'approved', 'posted', 'discarded', 'reversed'] as const;
@@ -63,7 +63,7 @@ export function orgRoutes(ctx: AppContext): Router {
   r.get('/journals', async (req, res) => {
     const scope = scopeOf(res);
     await clientCapability(ctx, res, 'journals');
-    await ensureOpeningRegistered(ctx.db, ctx.ledger, scope);
+    await registerMissingEntries(ctx.db, ctx.ledger, scope);
     const wanted = z.array(z.enum(STATUSES)).optional().parse(typeof req.query.status === 'string' && req.query.status ? req.query.status.split(',') : undefined);
     // Client viewers only ever see posted journals and reversals, whatever they ask for.
     const statuses: readonly JournalStatus[] | undefined = scope.role === 'client_viewer'

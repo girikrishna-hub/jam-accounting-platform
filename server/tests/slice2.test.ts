@@ -127,6 +127,9 @@ describe.skipIf(!TEST_DATABASE_URL)('slice 2: journals', () => {
     expect(post.body.error).toBe('CHANGED_SINCE_APPROVAL');
     const detail = await accountant.get(`/api/orgs/${h.orgs.harbourview}/journals/${id}`);
     expect(detail.body.journal.status).toBe('draft');
+    // The runtime refused the stale version itself (Bookkeeping BR-28): nothing was posted.
+    const entry = await h.ledger.getEntry({ actorId: h.users.accountant, principal: 'accountant', assignedOrganisationId: org.id, organisationId: org.id, ledgerId: org.ledger_id! }, id);
+    expect(entry).toMatchObject({ state: 'draft', version: 2, postingSequence: null });
   });
 
   it('reverses a posted journal once, restoring the balance', async () => {
