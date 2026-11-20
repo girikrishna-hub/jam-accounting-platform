@@ -7,7 +7,7 @@ export default defineConfig({
     fileParallelism: false,
     // Generous limits so the suite also passes against a remote database
     // (e.g. a Neon scratch database on Replit), where each round trip is slower.
-    testTimeout: 120_000,
+    testTimeout: 300_000,
     hookTimeout: 300_000,
   },
 });
