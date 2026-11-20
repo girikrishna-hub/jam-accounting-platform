@@ -39,7 +39,18 @@ describe('demo seed: January receivables', () => {
   });
 
   it('is safe to run again', async () => {
-    await seedDemo(h.db, h.ledger, 'Demo-Password-2026', () => undefined);
+    const logs: string[] = [];
+    await seedDemo(h.db, h.ledger, 'Demo-Password-2026', (l) => logs.push(l));
+    expect(logs).toContain('January receivables already loaded.');
     expect((await feeNoteSummaries(h.db, h.orgs.harbourview)).length).toBe(13);
   });
+
+  it('skips without failing when January is not open', async () => {
+    const logs: string[] = [];
+    await h.db.query("DELETE FROM app.allocations; DELETE FROM app.receipts; DELETE FROM app.fee_notes WHERE NOT brought_forward");
+    const closed = Object.assign(Object.create(h.ledger) as typeof h.ledger, { listPeriods: async () => [{ startDate: '2026-01-01', endDate: '2026-01-31', state: 'closed' }] });
+    await seedDemo(h.db, closed, 'Demo-Password-2026', (l) => logs.push(l));
+    expect(logs).toContain('January receivables not loaded: January 2026 is not open.');
+  });
+
 });

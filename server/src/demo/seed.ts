@@ -68,7 +68,12 @@ export async function seedDemo(db: Db, ledger: LedgerGateway, password: string, 
     log('Opening balances already posted.');
   }
 
-  await seedJanuaryReceivables(db, ledger, { org: { ...harbourview, ledger_id: harbourview.ledger_id! }, role: 'accountant', actor }, log);
+  // Never blocks start-up: if January is closed or anything fails, say so and carry on.
+  try {
+    await seedJanuaryReceivables(db, ledger, { org: { ...harbourview, ledger_id: harbourview.ledger_id! }, role: 'accountant', actor }, log);
+  } catch (e) {
+    log(`January receivables not loaded: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   log('\nDemo users (password = DEMO_PASSWORD):');
   log('  admin@demo.firm          firm administrator');
@@ -114,16 +119,24 @@ const RECEIPTS: { date: string; from: string | 'BF' | null; payer?: string; kind
 ];
 
 async function seedJanuaryReceivables(db: Db, ledger: LedgerGateway, scope: Scope, log: (line: string) => void): Promise<void> {
-  if ((await getSettings(db, scope.org.id))?.set_up_at) { log('Receivables already set up.'); return; }
   const ctx = { db, ledger };
-  const set = await saveSettings(ctx, scope, {
+  const loaded = await db.query(
+    `SELECT 1 FROM app.fee_notes WHERE org_id = $1 AND NOT brought_forward UNION ALL SELECT 1 FROM app.receipts WHERE org_id = $1 LIMIT 1`, [scope.org.id]);
+  if (loaded.rowCount) { log('January receivables already loaded.'); return; }
+  const january = (await ledger.listPeriods(scope.actor)).find((p) => p.startDate === '2026-01-01');
+  if (january?.state !== 'open') { log('January receivables not loaded: January 2026 is not open.'); return; }
+  if ((await getSettings(db, scope.org.id))?.set_up_at) {
+    log('Receivables were already set up; loading January.');
+  } else {
+    const set = await saveSettings(ctx, scope, {
     receivableAccount: '1100', gctAccount: '2100', disbursementAccount: '1120', retainerAccount: '2200',
     practiceAreas: [
       ['Conveyancing', '4000'], ['Litigation', '4010'], ['Corporate', '4020'], ['Probate', '4030'],
       ['Family', '4040'], ['Notarial', '4050'], ['Immigration', '4050'], ['Retainer', '4100'],
     ].map(([name, incomeAccount]) => ({ name, incomeAccount })),
-  });
-  log(`Receivables set up; brought forward ${set.broughtForward}`);
+    });
+    log(`Receivables set up; brought forward ${set.broughtForward}`);
+  }
 
   const customers = new Map<string, string>();
   for (const name of new Set(FEE_NOTES.map((f) => f[2]))) customers.set(name, (await createCustomer(ctx, scope, { name })).id);
