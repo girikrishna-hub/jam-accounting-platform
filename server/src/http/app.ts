@@ -23,7 +23,11 @@ export function createApp(ctx: AppContext): express.Express {
     next();
   });
 
-  app.get('/healthz', (_req, res) => { res.json({ ok: true }); });
+  // /api/health works in production: Cloud Run (Replit autoscale) reserves paths ending in "z",
+  // so /healthz never reaches the app there. /healthz is kept for local use.
+  const health = (_req: unknown, res: { json: (body: unknown) => void }) => { res.json({ ok: true }); };
+  app.get('/api/health', health);
+  app.get('/healthz', health);
 
   const api = express.Router();
   api.use(express.json({ limit: '3mb' }));

@@ -59,6 +59,14 @@ describe.skipIf(!TEST_DATABASE_URL)('slice 1 acceptance', () => {
     expect(cash.balance).toBe('845231055');
   });
 
+  it('answers the health check without sign-in on /api/health and /healthz', async () => {
+    for (const path of ['/api/health', '/healthz']) {
+      const res = await request(h.app).get(path);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ok: true });
+    }
+  });
+
   it('posts opening balances only once', async () => {
     const res = await act(accountant, 'opening-balances.post', hvOrgRef, { csv: await readSeed('trial-balance-2025-12-31.csv') }, 'opening-0003');
     expect(res.status).toBe(422);
