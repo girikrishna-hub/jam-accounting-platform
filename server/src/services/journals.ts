@@ -51,11 +51,14 @@ export interface JournalRow {
   posting_sequence: number | null;
   reversal_of: string | null;
   reversed_by_entry: string | null;
+  /** Set when a source document (fee note, receipt, credit note) posted this journal. */
+  source_type: string | null;
+  source_id: string | null;
 }
 
 const COLUMNS = `org_id, entry_id, kind, status, to_char(entry_date, 'YYYY-MM-DD') AS entry_date, description, total_minor::text AS total_minor,
   created_by, created_at, updated_by, updated_at, submitted_by, submitted_at, reviewed_by, reviewed_at, review_note,
-  approved_version, posted_by, posted_at, posting_sequence, reversal_of, reversed_by_entry`;
+  approved_version, posted_by, posted_at, posting_sequence, reversal_of, reversed_by_entry, source_type, source_id`;
 
 /** Statuses a journal can be edited, discarded or posted from. */
 const EDITABLE: JournalStatus[] = ['draft', 'returned', 'approved'];
@@ -320,6 +323,9 @@ export async function reverseJournal(ctx: Ctx, scope: OrgScope, entryId: string,
   const row = await load(ctx, scope, entryId);
   requireStatus(row, ['posted'], 'Only posted journals can be reversed.');
   if (row.kind === 'reversal') throw new BusinessRuleError('REVERSAL_NOT_ALLOWED', 'A reversing journal cannot itself be reversed. Post a new journal instead.');
+  // Journals posted by a fee note, receipt or credit note are corrected through that document,
+  // so the receivables records and the ledger never disagree.
+  if (row.source_type) throw new BusinessRuleError('SOURCE_DOCUMENT', 'This journal was posted by a receivables document. Correct it there (for example with a credit note).');
   if (input.reversalDate < row.entry_date) throw new BusinessRuleError('REVERSAL_DATE', 'The reversal date cannot be before the original journal\'s date.');
   const reversal = await ctx.ledger.reverseEntry(scope.actor, { entryId, reversalDate: input.reversalDate, reason }, `reverse:${scope.actor.ledgerId}:${entryId}`);
   await ctx.db.query(

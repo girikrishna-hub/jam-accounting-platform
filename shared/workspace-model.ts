@@ -11,8 +11,8 @@ export const APPLICATION_ID = 'jam-accounting';
 export type Role = 'accountant' | 'reviewer' | 'client_viewer';
 export const ROLES: readonly Role[] = ['accountant', 'reviewer', 'client_viewer'];
 
-export type ObjectTypeId = 'client-organisation' | 'account' | 'period' | 'journal';
-export const OBJECT_TYPE_IDS: readonly ObjectTypeId[] = ['client-organisation', 'account', 'period', 'journal'];
+export type ObjectTypeId = 'client-organisation' | 'account' | 'period' | 'journal' | 'customer' | 'fee-note';
+export const OBJECT_TYPE_IDS: readonly ObjectTypeId[] = ['client-organisation', 'account', 'period', 'journal', 'customer', 'fee-note'];
 
 export interface CapabilityModel {
   readonly capabilityId: string;
@@ -72,6 +72,7 @@ export const OBJECT_TYPES: readonly ObjectTypeModel[] = [
       { capabilityId: 'profile', label: 'Profile', order: 20, roles: ALL, actionIds: ['org.profile.update', 'org.controls.update'] },
       { capabilityId: 'chart-of-accounts', label: 'Chart of accounts', order: 30, roles: ALL, actionIds: ['coa.import', 'opening-balances.post'] },
       { capabilityId: 'journals', label: 'Journals', order: 35, roles: ALL, actionIds: ['journal.create'] },
+      { capabilityId: 'receivables', label: 'Receivables', order: 37, roles: STAFF, actionIds: ['receivables.settings', 'customer.create', 'fee-note.create', 'receipt.record', 'receipt.reassign'] },
       { capabilityId: 'periods', label: 'Periods', order: 40, roles: STAFF, actionIds: ['period.open'] },
       { capabilityId: 'trial-balance', label: 'Trial balance', order: 50, roles: ALL, actionIds: [] },
       { capabilityId: 'activity', label: 'Activity', order: 60, roles: ALL, actionIds: [] },
@@ -136,6 +137,48 @@ export const OBJECT_TYPES: readonly ObjectTypeModel[] = [
       { capabilityId: 'review', label: 'Review trail', order: 20, roles: STAFF, actionIds: [] },
     ],
   },
+  {
+    objectTypeId: 'customer',
+    displayName: 'Customer',
+    version: '1.0.0',
+    defaultCapabilityId: 'statement',
+    metadataFields: [
+      { fieldId: 'balance', label: 'Balance owed' },
+      { fieldId: 'unallocated', label: 'Unallocated payments' },
+      { fieldId: 'retainerHeld', label: 'Retainer held' },
+      { fieldId: 'trn', label: 'TRN' },
+      { fieldId: 'status', label: 'Status' },
+    ],
+    headerFieldIds: ['trn'],
+    summaryFieldIds: ['balance', 'unallocated', 'retainerHeld'],
+    statusFieldId: 'status',
+    capabilities: [
+      { capabilityId: 'statement', label: 'Statement', order: 10, roles: STAFF, actionIds: [] },
+      { capabilityId: 'fee-notes', label: 'Fee notes', order: 20, roles: STAFF, actionIds: [] },
+      { capabilityId: 'details', label: 'Details', order: 30, roles: STAFF, actionIds: ['customer.update'] },
+    ],
+  },
+  {
+    objectTypeId: 'fee-note',
+    displayName: 'Fee note',
+    version: '1.0.0',
+    defaultCapabilityId: 'details',
+    metadataFields: [
+      { fieldId: 'customer', label: 'Customer' },
+      { fieldId: 'issueDate', label: 'Date' },
+      { fieldId: 'total', label: 'Total' },
+      { fieldId: 'outstanding', label: 'Outstanding' },
+      { fieldId: 'matter', label: 'Matter' },
+      { fieldId: 'status', label: 'Status' },
+    ],
+    headerFieldIds: ['customer', 'issueDate'],
+    summaryFieldIds: ['total', 'outstanding', 'matter'],
+    statusFieldId: 'status',
+    capabilities: [
+      { capabilityId: 'details', label: 'Fee note', order: 10, roles: STAFF, actionIds: ['fee-note.update', 'fee-note.discard', 'fee-note.issue', 'fee-note.allocate', 'fee-note.apply-retainer', 'fee-note.credit'] },
+      { capabilityId: 'settlement', label: 'Payments and credits', order: 20, roles: STAFF, actionIds: [] },
+    ],
+  },
 ];
 
 export const ACTIONS: readonly ActionModel[] = [
@@ -154,6 +197,19 @@ export const ACTIONS: readonly ActionModel[] = [
   { actionId: 'period.open', label: 'Open next period', objectTypeId: 'client-organisation', capabilityId: 'periods', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
   { actionId: 'account.update', label: 'Save account', objectTypeId: 'account', capabilityId: 'details', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
   { actionId: 'account.deactivate', label: 'Deactivate account', objectTypeId: 'account', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'edit' },
+  // Slice 3a: receivables
+  { actionId: 'receivables.settings', label: 'Save receivables settings', objectTypeId: 'client-organisation', capabilityId: 'receivables', roles: PREPARER, requiresConfirmation: false, category: 'control' },
+  { actionId: 'customer.create', label: 'Add customer', objectTypeId: 'client-organisation', capabilityId: 'receivables', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'fee-note.create', label: 'New fee note', objectTypeId: 'client-organisation', capabilityId: 'receivables', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'receipt.record', label: 'Record receipt', objectTypeId: 'client-organisation', capabilityId: 'receivables', roles: PREPARER, requiresConfirmation: false, category: 'post' },
+  { actionId: 'receipt.reassign', label: 'Assign receipt to customer', objectTypeId: 'client-organisation', capabilityId: 'receivables', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'customer.update', label: 'Save customer', objectTypeId: 'customer', capabilityId: 'details', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'fee-note.update', label: 'Save fee note', objectTypeId: 'fee-note', capabilityId: 'details', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'fee-note.discard', label: 'Discard draft', objectTypeId: 'fee-note', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'edit' },
+  { actionId: 'fee-note.issue', label: 'Issue fee note', objectTypeId: 'fee-note', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
+  { actionId: 'fee-note.allocate', label: 'Allocate payment', objectTypeId: 'fee-note', capabilityId: 'details', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'fee-note.apply-retainer', label: 'Apply retainer', objectTypeId: 'fee-note', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
+  { actionId: 'fee-note.credit', label: 'Issue credit note', objectTypeId: 'fee-note', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
 ];
 
 export function objectTypeModel(objectTypeId: string): ObjectTypeModel | undefined {
@@ -183,4 +239,4 @@ export function workspacePath(orgId: string, objectTypeId: string, objectId: str
   return '/' + parts.map(encodeURIComponent).join('/');
 }
 
-export const WORKSPACE_PATH_PATTERN = /^\/c\/([0-9a-f-]{36})\/(client-organisation|account|period|journal)\/([A-Za-z0-9_.:-]{1,128})(?:\/([a-z-]{1,64}))?$/;
+export const WORKSPACE_PATH_PATTERN = /^\/c\/([0-9a-f-]{36})\/(client-organisation|account|period|journal|customer|fee-note)\/([A-Za-z0-9_.:-]{1,128})(?:\/([a-z-]{1,64}))?$/;

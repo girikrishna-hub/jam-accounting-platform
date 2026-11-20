@@ -5,6 +5,10 @@ import { requireAllowed } from '../../access/checks.ts';
 import { orgScope, scopeOf, type AppContext } from '../middleware.ts';
 import { registerMissingEntries, getJournal, listJournals, VISIBLE_TO_CLIENT, type JournalStatus } from '../../services/journals.ts';
 import { journalVisible } from '../../workspace/objects.ts';
+import {
+  TAX_CODE_OPTIONS, ageing, completePending, controlCheck, customerBalances, customerStatement, feeNoteDetail, feeNoteSummaries,
+  getCustomer, getFeeNote, getSettings, practiceAreas, receiptSummaries,
+} from '../../services/receivables.ts';
 
 const STATUSES = ['draft', 'submitted', 'returned', 'approved', 'posted', 'discarded', 'reversed'] as const;
 
@@ -150,6 +154,71 @@ export function orgRoutes(ctx: AppContext): Router {
       ...ledger.map((l) => ({ at: l.time, who: names.get(l.actorId) ?? 'System', what: l.operation, outcome: l.outcome, source: 'ledger' as const })),
     ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 200);
     res.json({ items });
+  });
+
+  // ---------- Slice 3a: receivables ----------
+
+  r.get('/receivables', async (_req, res) => {
+    const scope = scopeOf(res);
+    await clientCapability(ctx, res, 'receivables');
+    await completePending(ctx, scope);
+    const settings = await getSettings(ctx.db, scope.org.id);
+    const accounts = (await ctx.ledger.listAccounts(scope.actor)).filter((a) => a.active)
+      .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }))
+      .map((a) => ({ code: a.code, name: a.name, type: a.type, classification: a.classification ?? null }));
+    if (!settings?.set_up_at) {
+      res.json({ currency: scope.org.currency, setUp: false, settings, practiceAreas: await practiceAreas(ctx.db, scope.org.id), accounts, taxCodes: TAX_CODE_OPTIONS });
+      return;
+    }
+    const [customers, feeNotes, receipts, control, areas] = await Promise.all([
+      customerBalances(ctx.db, scope.org.id), feeNoteSummaries(ctx.db, scope.org.id), receiptSummaries(ctx.db, scope.org.id),
+      controlCheck(ctx, scope, settings), practiceAreas(ctx.db, scope.org.id),
+    ]);
+    res.json({ currency: scope.org.currency, setUp: true, settings, practiceAreas: areas, accounts, taxCodes: TAX_CODE_OPTIONS, customers, feeNotes, receipts, control });
+  });
+
+  r.get('/receivables/ageing', async (req, res) => {
+    const scope = scopeOf(res);
+    await clientCapability(ctx, res, 'receivables');
+    const asOf = ISO_DATE.parse(req.query.asOf ?? new Date().toISOString().slice(0, 10));
+    res.json({ currency: scope.org.currency, ...(await ageing(ctx.db, scope.org.id, asOf)) });
+  });
+
+  r.get('/customers/:customerId', async (req, res) => {
+    const scope = scopeOf(res);
+    const customerId = z.string().uuid().parse(req.params.customerId);
+    await requireAllowed(ctx, scope, 'customer', customerId, 'capability.statement.view');
+    const customer = await getCustomer(ctx.db, scope.org.id, customerId);
+    if (!customer) throw notFound();
+    const [statement, feeNotes, receipts, balances] = await Promise.all([
+      customerStatement(ctx.db, scope.org.id, customerId), feeNoteSummaries(ctx.db, scope.org.id, customerId),
+      receiptSummaries(ctx.db, scope.org.id, customerId), customerBalances(ctx.db, scope.org.id),
+    ]);
+    res.json({ currency: scope.org.currency, customer, balance: balances.find((b) => b.id === customerId), statement, feeNotes, receipts });
+  });
+
+  r.get('/fee-notes/:feeNoteId', async (req, res) => {
+    const scope = scopeOf(res);
+    const feeNoteId = z.string().uuid().parse(req.params.feeNoteId);
+    await requireAllowed(ctx, scope, 'fee-note', feeNoteId, 'capability.details.view');
+    const note = await getFeeNote(ctx.db, scope.org.id, feeNoteId);
+    if (!note || note.status === 'discarded') throw notFound();
+    const [detail, areas, customers] = await Promise.all([
+      feeNoteDetail(ctx.db, scope.org.id, note), practiceAreas(ctx.db, scope.org.id), customerBalances(ctx.db, scope.org.id),
+    ]);
+    res.json({
+      currency: scope.org.currency,
+      firm: { name: scope.org.name, legalName: scope.org.legal_name, trn: scope.org.trn },
+      feeNote: {
+        id: note.id, number: note.number, status: note.status, broughtForward: note.brought_forward, issueDate: note.issue_date,
+        customerId: note.customer_id, matterRef: note.matter_ref, practiceArea: note.practice_area, description: note.description,
+        lines: note.lines, fees: note.fees_minor, gct: note.gct_minor, disbursements: note.disbursements_minor, total: note.total_minor, entryId: note.entry_id,
+      },
+      ...detail,
+      practiceAreas: areas,
+      customers: customers.filter((c) => c.kind === 'customer' && c.status === 'active').map((c) => ({ id: c.id, name: c.name })),
+      taxCodes: TAX_CODE_OPTIONS,
+    });
   });
 
   return r;
