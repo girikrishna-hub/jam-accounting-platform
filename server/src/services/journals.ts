@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
-import type { EntryView, LineInput } from '@governedai-labs/bookkeeping-runtime';
+import { randomUUID } from 'node:crypto';
+import { RuntimeError, type EntryState, type EntrySummary, type EntryView, type LineInput } from '@governedai-labs/bookkeeping-runtime';
 import { z } from 'zod';
 import type { Db } from '../db/db.ts';
 import type { LedgerGateway } from '../ledger/gateway.ts';
@@ -12,16 +12,17 @@ import { BusinessRuleError } from './rule-error.ts';
  * Journal workflow (design pack: journal approval = maker-checker, one handoff).
  *
  * The Bookkeeping runtime holds each journal and alone decides posting, balance and period
- * rules. The app adds the approval step and keeps a register of status and people, because
- * the runtime has no list-journals query (PF-10).
+ * rules. The app adds the approval step and keeps a register of the workflow status and the
+ * people involved, which the runtime does not track. Entries the app did not create (such as
+ * the opening journal) are found with the runtime's ListEntries query and registered.
  *
  *   approval on : draft ─submit→ submitted ─approve→ approved ─post→ posted ─reverse→ reversed
  *                               └─return→ returned ─(edit, submit again)
  *   approval off: draft ─post→ posted
  *
  * The approver must be someone other than the preparer and submitter. Any edit after
- * approval sends the journal back to draft; posting re-checks that the ledger's copy
- * still matches what was approved (a fingerprint of date, description and lines).
+ * approval sends the journal back to draft. Approval records the entry's version, and posting
+ * passes it to the runtime, which refuses to post any other version (Bookkeeping BR-28).
  */
 
 export type JournalStatus = 'draft' | 'submitted' | 'returned' | 'approved' | 'posted' | 'discarded' | 'reversed';
@@ -44,7 +45,7 @@ export interface JournalRow {
   reviewed_by: string | null;
   reviewed_at: string | null;
   review_note: string | null;
-  approved_fingerprint: string | null;
+  approved_version: number | null;
   posted_by: string | null;
   posted_at: string | null;
   posting_sequence: number | null;
@@ -54,7 +55,7 @@ export interface JournalRow {
 
 const COLUMNS = `org_id, entry_id, kind, status, to_char(entry_date, 'YYYY-MM-DD') AS entry_date, description, total_minor::text AS total_minor,
   created_by, created_at, updated_by, updated_at, submitted_by, submitted_at, reviewed_by, reviewed_at, review_note,
-  approved_fingerprint, posted_by, posted_at, posting_sequence, reversal_of, reversed_by_entry`;
+  approved_version, posted_by, posted_at, posting_sequence, reversal_of, reversed_by_entry`;
 
 /** Statuses a journal can be edited, discarded or posted from. */
 const EDITABLE: JournalStatus[] = ['draft', 'returned', 'approved'];
@@ -116,14 +117,6 @@ export function parseJournalInput(raw: unknown): ParsedJournal {
   };
 }
 
-/** Stable digest of what an approver saw: date, description, reference and every line. */
-export function fingerprint(entry: Pick<EntryView, 'entryDate' | 'description' | 'externalReference' | 'lines'>): string {
-  const lines = [...entry.lines]
-    .sort((a, b) => a.lineNumber - b.lineNumber)
-    .map((l) => [l.accountId, l.side, l.amount.amount, l.memo ?? '']);
-  return createHash('sha256').update(JSON.stringify([entry.entryDate, entry.description, entry.externalReference ?? '', lines])).digest('hex');
-}
-
 function totals(entry: Pick<EntryView, 'lines'>) {
   let debits = 0n;
   let credits = 0n;
@@ -160,14 +153,23 @@ async function transition(db: Db, orgId: string, entryId: string, from: readonly
   if (!r.rowCount) throw new BusinessRuleError('JOURNAL_CHANGED', 'This journal was changed by someone else. Reload and try again.');
 }
 
-/** Registers the opening journal of a client whose opening balances were posted before the register existed. */
-export async function ensureOpeningRegistered(db: Db, ledger: LedgerGateway, scope: OrgScope): Promise<void> {
-  const known = await db.query(`SELECT 1 FROM app.journals WHERE org_id = $1 AND kind = 'opening'`, [scope.org.id]);
-  if (known.rowCount) return;
-  const entryId = await ledger.openingEntryId(scope.actor);
-  if (!entryId) return;
-  const entry = await ledger.getEntry(scope.actor, entryId);
-  await registerOpening(db, scope.org.id, entry, null);
+const STATUS_FROM_STATE: Record<EntryState, JournalStatus> = { draft: 'draft', discarded: 'discarded', posted: 'posted', reversed: 'reversed' };
+
+/**
+ * Registers any ledger entry the register does not know yet (for example an opening journal
+ * posted before the register existed), using the runtime's entry list (Bookkeeping 1.2.0).
+ */
+export async function registerMissingEntries(db: Db, ledger: LedgerGateway, scope: OrgScope): Promise<void> {
+  const known = new Set((await db.query<{ entry_id: string }>(`SELECT entry_id FROM app.journals WHERE org_id = $1`, [scope.org.id])).rows.map((r) => r.entry_id));
+  const missing = (await ledger.listEntries(scope.actor)).filter((e) => !known.has(e.entryId));
+  for (const e of missing) await registerSummary(db, scope.org.id, e);
+}
+
+async function registerSummary(db: Db, orgId: string, e: EntrySummary): Promise<void> {
+  await db.query(
+    `INSERT INTO app.journals (org_id, entry_id, kind, status, entry_date, description, total_minor, posting_sequence, reversal_of, reversed_by_entry)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (org_id, entry_id) DO NOTHING`,
+    [orgId, e.entryId, e.kind, STATUS_FROM_STATE[e.state], e.entryDate, e.description, e.totalDebits.amount, e.postingSequence ?? null, e.reversalOf ?? null, e.reversedBy ?? null]);
 }
 
 export async function registerOpening(db: Db, orgId: string, entry: EntryView, actorId: string | null): Promise<void> {
@@ -217,7 +219,7 @@ export async function updateJournal(ctx: Ctx, scope: OrgScope, entryId: string, 
   await transition(ctx.db, scope.org.id, entryId, EDITABLE, {
     status: row.status === 'approved' ? 'draft' : row.status, entry_date: j.entryDate, description: j.description,
     total_minor: j.totalDebits.toString(), updated_by: scope.actor.actorId,
-    approved_fingerprint: null, ...(row.status === 'approved' ? { reviewed_by: null, reviewed_at: null, review_note: 'Changed after approval; approval cleared.' } : {}),
+    approved_version: null, ...(row.status === 'approved' ? { reviewed_by: null, reviewed_at: null, review_note: 'Changed after approval; approval cleared.' } : {}),
   });
   await audit(ctx.db, { actorId: scope.actor.actorId, orgId: scope.org.id, action: 'journal.update', target: entryId, detail: { approvalCleared: row.status === 'approved' } });
   return (await getJournal(ctx.db, scope.org.id, entryId))!;
@@ -251,7 +253,7 @@ export async function approveJournal(ctx: Ctx, scope: OrgScope, entryId: string)
   const entry = await ctx.ledger.getEntry(scope.actor, entryId);
   requireBalanced(entry);
   await transition(ctx.db, scope.org.id, entryId, ['submitted'], {
-    status: 'approved', reviewed_by: me, reviewed_at: new Date(), review_note: null, approved_fingerprint: fingerprint(entry),
+    status: 'approved', reviewed_by: me, reviewed_at: new Date(), review_note: null, approved_version: entry.version,
   });
   await audit(ctx.db, { actorId: me, orgId: scope.org.id, action: 'journal.approve', target: entryId });
   return (await getJournal(ctx.db, scope.org.id, entryId))!;
@@ -263,7 +265,7 @@ export async function returnJournal(ctx: Ctx, scope: OrgScope, entryId: string, 
   const row = await load(ctx, scope, entryId);
   requireStatus(row, ['submitted'], 'Only submitted journals can be returned.');
   await transition(ctx.db, scope.org.id, entryId, ['submitted'], {
-    status: 'returned', reviewed_by: scope.actor.actorId, reviewed_at: new Date(), review_note: note, approved_fingerprint: null,
+    status: 'returned', reviewed_by: scope.actor.actorId, reviewed_at: new Date(), review_note: note, approved_version: null,
   });
   await audit(ctx.db, { actorId: scope.actor.actorId, orgId: scope.org.id, action: 'journal.return', target: entryId, detail: { reason: note } });
   return (await getJournal(ctx.db, scope.org.id, entryId))!;
@@ -272,24 +274,34 @@ export async function returnJournal(ctx: Ctx, scope: OrgScope, entryId: string, 
 export async function postJournal(ctx: Ctx, scope: OrgScope, entryId: string): Promise<JournalRow> {
   const row = await load(ctx, scope, entryId);
   const entry = await ctx.ledger.getEntry(scope.actor, entryId);
+  let expectedVersion: number | undefined;
   if (entry.state !== 'posted') {
     if (scope.org.journal_approval_required) {
       requireStatus(row, ['approved'], 'This client requires approval: submit the journal and have a reviewer approve it before posting.');
-      if (row.approved_fingerprint !== fingerprint(entry)) {
-        await transition(ctx.db, scope.org.id, entryId, ['approved'], { status: 'draft', approved_fingerprint: null, review_note: 'Changed after approval; approval cleared.' });
-        throw new BusinessRuleError('CHANGED_SINCE_APPROVAL', 'The journal changed after it was approved. It is back in draft and needs approval again.');
-      }
+      expectedVersion = row.approved_version ?? undefined;
+      if (expectedVersion == null) throw new BusinessRuleError('JOURNAL_STATUS', 'This approval has no recorded version. Ask the reviewer to approve it again.');
     } else {
       requireStatus(row, ['draft', 'returned', 'approved', 'submitted'], 'Only draft journals can be posted.');
     }
     requireBalanced(entry);
   }
-  // A stable request ID: a double-click or retry posts once and returns the same result.
-  const posted = await ctx.ledger.postEntry(scope.actor, entryId, `post:${scope.actor.ledgerId}:${entryId}`);
+  // A stable request ID per approved version: a double-click or retry posts once and returns the same result.
+  const requestId = `post:${scope.actor.ledgerId}:${entryId}${expectedVersion != null ? `:v${expectedVersion}` : ''}`;
+  let posted: EntryView;
+  try {
+    // The runtime posts only the approved version, in its own transaction (Bookkeeping BR-28).
+    posted = await ctx.ledger.postEntry(scope.actor, entryId, requestId, expectedVersion);
+  } catch (error) {
+    if (error instanceof RuntimeError && error.code === 'Conflict' && error.reason === 'ENTRY_VERSION_MISMATCH') {
+      await transition(ctx.db, scope.org.id, entryId, ['approved'], { status: 'draft', approved_version: null, review_note: 'Changed after approval; approval cleared.' });
+      throw new BusinessRuleError('CHANGED_SINCE_APPROVAL', 'The journal changed after it was approved. It is back in draft and needs approval again.');
+    }
+    throw error;
+  }
   await transition(ctx.db, scope.org.id, entryId, ['draft', 'returned', 'approved', 'submitted', 'posted'], {
     status: 'posted', posted_by: row.posted_by ?? scope.actor.actorId, posted_at: row.posted_at ?? new Date(), posting_sequence: posted.postingSequence ?? null,
   });
-  await audit(ctx.db, { actorId: scope.actor.actorId, orgId: scope.org.id, action: 'journal.post', target: entryId, detail: { postingSequence: posted.postingSequence } });
+  await audit(ctx.db, { actorId: scope.actor.actorId, orgId: scope.org.id, action: 'journal.post', target: entryId, detail: { postingSequence: posted.postingSequence, version: posted.version } });
   return (await getJournal(ctx.db, scope.org.id, entryId))!;
 }
 

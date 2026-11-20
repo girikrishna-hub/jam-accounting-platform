@@ -17,7 +17,7 @@ Internal engineering notes. Not for customers.
 - On by default for every client; a reviewer can switch it off or on (audited).
 - With approval on: draft → submitted → approved → posted. A reviewer can return a submitted journal with a reason.
 - The approver must not be the person who prepared, last edited or submitted the journal (checked on the server).
-- Editing an approved journal clears the approval. Before posting, the server compares a fingerprint of the ledger's copy with the one taken at approval; if they differ, the journal goes back to draft.
+- Editing an approved journal clears the approval. Approval records the entry's version (Bookkeeping 1.2.0); posting passes it as `expectedVersion`, so the runtime refuses to post any other version. If it refuses, the journal goes back to draft.
 - With approval off: accountants post drafts directly.
 - Reversals are made by accountants without approval, with a date and a reason (audited). A reversing journal cannot be reversed.
 

@@ -33,6 +33,7 @@ export const LEDGER_POLICY: Readonly<Record<string, readonly LedgerPrincipal[]>>
   'bookkeeping.ListAccounts': READ_ALL,
   'bookkeeping.ListPeriods': STAFF,
   'bookkeeping.GetEntry': READ_ALL,
+  'bookkeeping.ListEntries': READ_ALL,
   'bookkeeping.GetAccountBalance': READ_ALL,
   'bookkeeping.GetAccountLedger': READ_ALL,
   'bookkeeping.GetTrialBalance': READ_ALL,
