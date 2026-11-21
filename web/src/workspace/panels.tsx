@@ -6,6 +6,7 @@ import { Link } from '../app-context.tsx';
 import type { ActionFeedback } from './feedback.ts';
 import { ErrorText, Loading, Notice, ROLE_LABEL, hasAction, readFileText, useAction, useData, useFlash, useWorkspaceTools } from './tools.tsx';
 import { ClientJournals, JournalLines, JournalReview } from './journal-panels.tsx';
+import { ClientReceivables, CustomerDetails, CustomerFeeNotes, CustomerStatement, FeeNoteDetails, FeeNoteSettlement } from './receivables-panels.tsx';
 
 interface Account {
   accountId: string; code: string; name: string; type: string; normalBalance: 'debit' | 'credit';
@@ -391,4 +392,10 @@ export const PANELS: CapabilityPanels = {
   'client-organisation/journals': ClientJournals,
   'journal/lines': JournalLines,
   'journal/review': JournalReview,
+  'client-organisation/receivables': ClientReceivables,
+  'customer/statement': CustomerStatement,
+  'customer/fee-notes': CustomerFeeNotes,
+  'customer/details': CustomerDetails,
+  'fee-note/details': FeeNoteDetails,
+  'fee-note/settlement': FeeNoteSettlement,
 };

@@ -11,6 +11,10 @@ import { setJournalApproval, updateProfile } from '../services/organisations.ts'
 import {
   approveJournal, createJournal, discardJournal, postJournal, returnJournal, reverseJournal, submitJournal, updateJournal,
 } from '../services/journals.ts';
+import {
+  allocateReceipt, applyRetainer, createCustomer, createFeeNote, discardFeeNote, issueCreditNote, issueFeeNote, reassignReceipt,
+  recordReceipt, saveSettings, updateCustomer, updateFeeNote,
+} from '../services/receivables.ts';
 import { resolveObject } from './objects.ts';
 import { audit } from '../audit.ts';
 
@@ -67,6 +71,19 @@ const HANDLERS: Record<string, Handler> = {
   'journal.post': async (ctx, scope, entryId) => postJournal(ctx, scope, entryId),
   'journal.discard': async (ctx, scope, entryId) => discardJournal(ctx, scope, entryId),
   'journal.reverse': async (ctx, scope, entryId, input) => reverseJournal(ctx, scope, entryId, z.object({ reversalDate: ISO_DATE, reason: z.string().max(500) }).parse(input)),
+  // Slice 3a: receivables
+  'receivables.settings': async (ctx, scope, _id, input) => saveSettings(ctx, scope, input),
+  'customer.create': async (ctx, scope, _id, input) => createCustomer(ctx, scope, input),
+  'customer.update': async (ctx, scope, id, input) => updateCustomer(ctx, scope, id, input),
+  'fee-note.create': async (ctx, scope, _id, input) => createFeeNote(ctx, scope, input),
+  'fee-note.update': async (ctx, scope, id, input) => updateFeeNote(ctx, scope, id, input),
+  'fee-note.discard': async (ctx, scope, id) => discardFeeNote(ctx, scope, id),
+  'fee-note.issue': async (ctx, scope, id) => issueFeeNote(ctx, scope, id),
+  'fee-note.allocate': async (ctx, scope, id, input) => allocateReceipt(ctx, scope, id, input),
+  'fee-note.apply-retainer': async (ctx, scope, id, input) => applyRetainer(ctx, scope, id, input),
+  'fee-note.credit': async (ctx, scope, id, input) => issueCreditNote(ctx, scope, id, input),
+  'receipt.record': async (ctx, scope, _id, input) => recordReceipt(ctx, scope, input),
+  'receipt.reassign': async (ctx, scope, _id, input) => reassignReceipt(ctx, scope, input),
 };
 
 export interface ExecuteRequest {
