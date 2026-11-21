@@ -15,7 +15,7 @@ import { BusinessRuleError } from './rule-error.ts';
 
 export interface Ctx { db: Db; ledger: LedgerGateway }
 export type Client = pg.PoolClient;
-export type SourceType = 'fee-note' | 'receipt' | 'credit-note' | 'retainer-application' | 'expense' | 'expense-cancellation' | 'supplier-payment';
+export type SourceType = 'fee-note' | 'receipt' | 'credit-note' | 'retainer-application' | 'expense' | 'expense-cancellation' | 'supplier-payment' | 'bank-entry';
 
 
 export async function tx<T>(db: Db, run: (c: Client) => Promise<T>): Promise<T> {

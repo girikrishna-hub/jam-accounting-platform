@@ -13,6 +13,7 @@ import {
   EXPENSE_TAX_CODES, completePendingPayables, expenseDetail, expenseSummaries, getExpense, getPayableSettings, getSupplier, payablesControl,
   supplierBalances, supplierPayments,
 } from '../../services/payables.ts';
+import { bankOverview, completePendingBank, flaggedEntries, reconciliation } from '../../services/banking.ts';
 
 const STATUSES = ['draft', 'submitted', 'returned', 'approved', 'posted', 'discarded', 'reversed'] as const;
 
@@ -271,6 +272,25 @@ export function orgRoutes(ctx: AppContext): Router {
     if (!e || e.status === 'discarded') throw notFound();
     const [detail, suppliers, accounts] = await Promise.all([expenseDetail(ctx.db, scope.org.id, e), activeSuppliers(scope.org.id), accountOptions(scope)]);
     res.json({ currency: scope.org.currency, ...detail, suppliers, accounts, taxCodes: EXPENSE_TAX_CODES });
+  });
+
+  // ---------- Slice 4: bank reconciliation ----------
+
+  r.get('/bank', async (req, res) => {
+    const scope = scopeOf(res);
+    await clientCapability(ctx, res, 'banking');
+    await completePendingBank(ctx, scope);
+    const accounts = await accountOptions(scope);
+    const bankAccounts = accounts.filter((a) => a.type === 'asset' && (a.classification ?? '').startsWith('BS.CA.CASH'));
+    const code = z.string().max(20).optional().parse(req.query.account) ?? bankAccounts[0]?.code;
+    if (!code) { res.json({ currency: scope.org.currency, bankAccounts, account: null }); return; }
+    const overview = await bankOverview(ctx, scope, code);
+    const periods = (await ctx.ledger.listPeriods(scope.actor)).map((p) => p.endDate).sort();
+    const lastLine = overview.statements[overview.statements.length - 1]?.last;
+    const asked = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().parse(req.query.periodEnd);
+    const periodEnd = asked ?? [...periods].reverse().find((p) => !lastLine || p <= lastLine) ?? periods[periods.length - 1];
+    const rec = overview.statements.length && periodEnd ? await reconciliation(ctx, scope, code, periodEnd) : null;
+    res.json({ currency: scope.org.currency, bankAccounts, ...overview, periods, periodEnd, reconciliation: rec, flagged: await flaggedEntries(ctx.db, scope.org.id), accounts });
   });
 
   return r;

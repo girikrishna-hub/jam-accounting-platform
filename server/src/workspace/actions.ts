@@ -18,6 +18,7 @@ import {
 import {
   cancelExpense, createExpense, createSupplier, discardExpense, recordExpense, recordSupplierPayment, savePayableSettings, updateExpense, updateSupplier,
 } from '../services/payables.ts';
+import { completeReconciliation, createFromLine, deleteRule, importStatement, matchLine, signOffReconciliation, unmatchLine } from '../services/banking.ts';
 import { resolveObject } from './objects.ts';
 import { audit } from '../audit.ts';
 
@@ -97,6 +98,14 @@ const HANDLERS: Record<string, Handler> = {
   'expense.discard': async (ctx, scope, id) => discardExpense(ctx, scope, id),
   'expense.cancel': async (ctx, scope, id, input) => cancelExpense(ctx, scope, id, input),
   'supplier-payment.record': async (ctx, scope, _id, input) => recordSupplierPayment(ctx, scope, input),
+  // Slice 4: bank reconciliation
+  'bank.import': async (ctx, scope, _id, input) => importStatement(ctx, scope, input),
+  'bank.match': async (ctx, scope, _id, input) => matchLine(ctx, scope, input),
+  'bank.unmatch': async (ctx, scope, _id, input) => unmatchLine(ctx, scope, input),
+  'bank.create': async (ctx, scope, _id, input) => createFromLine(ctx, scope, input),
+  'bank-rule.delete': async (ctx, scope, _id, input) => deleteRule(ctx, scope, input),
+  'bank.reconcile': async (ctx, scope, _id, input) => completeReconciliation(ctx, scope, input),
+  'bank.sign-off': async (ctx, scope, _id, input) => signOffReconciliation(ctx, scope, input),
 };
 
 export interface ExecuteRequest {

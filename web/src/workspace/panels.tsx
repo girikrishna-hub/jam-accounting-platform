@@ -8,6 +8,7 @@ import { ErrorText, Loading, Notice, ROLE_LABEL, hasAction, readFileText, useAct
 import { ClientJournals, JournalLines, JournalReview } from './journal-panels.tsx';
 import { ClientReceivables, CustomerDetails, CustomerFeeNotes, CustomerStatement, FeeNoteDetails, FeeNoteSettlement } from './receivables-panels.tsx';
 import { ClientExpenses, ExpenseDetails, SupplierDetails, SupplierExpenses } from './payables-panels.tsx';
+import { ClientBank } from './bank-panels.tsx';
 
 interface Account {
   accountId: string; code: string; name: string; type: string; normalBalance: 'debit' | 'credit';
@@ -403,4 +404,5 @@ export const PANELS: CapabilityPanels = {
   'supplier/expenses': SupplierExpenses,
   'supplier/details': SupplierDetails,
   'expense/details': ExpenseDetails,
+  'client-organisation/banking': ClientBank,
 };

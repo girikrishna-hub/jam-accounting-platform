@@ -74,6 +74,7 @@ export const OBJECT_TYPES: readonly ObjectTypeModel[] = [
       { capabilityId: 'journals', label: 'Journals', order: 35, roles: ALL, actionIds: ['journal.create'] },
       { capabilityId: 'receivables', label: 'Receivables', order: 37, roles: STAFF, actionIds: ['receivables.settings', 'customer.create', 'fee-note.create', 'receipt.record', 'receipt.reassign'] },
       { capabilityId: 'payables', label: 'Expenses', order: 38, roles: STAFF, actionIds: ['payables.settings', 'supplier.create', 'expense.create', 'supplier-payment.record'] },
+      { capabilityId: 'banking', label: 'Bank', order: 39, roles: STAFF, actionIds: ['bank.import', 'bank.match', 'bank.unmatch', 'bank.create', 'bank-rule.delete', 'bank.reconcile', 'bank.sign-off'] },
       { capabilityId: 'periods', label: 'Periods', order: 40, roles: STAFF, actionIds: ['period.open'] },
       { capabilityId: 'trial-balance', label: 'Trial balance', order: 50, roles: ALL, actionIds: [] },
       { capabilityId: 'activity', label: 'Activity', order: 60, roles: ALL, actionIds: [] },
@@ -259,6 +260,14 @@ export const ACTIONS: readonly ActionModel[] = [
   { actionId: 'expense.record', label: 'Record expense', objectTypeId: 'expense', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
   { actionId: 'expense.discard', label: 'Discard draft', objectTypeId: 'expense', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'edit' },
   { actionId: 'expense.cancel', label: 'Cancel expense', objectTypeId: 'expense', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
+  // Slice 4: bank reconciliation
+  { actionId: 'bank.import', label: 'Import statement', objectTypeId: 'client-organisation', capabilityId: 'banking', roles: PREPARER, requiresConfirmation: false, category: 'import' },
+  { actionId: 'bank.match', label: 'Match', objectTypeId: 'client-organisation', capabilityId: 'banking', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'bank.unmatch', label: 'Unmatch', objectTypeId: 'client-organisation', capabilityId: 'banking', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'bank.create', label: 'Enter from bank line', objectTypeId: 'client-organisation', capabilityId: 'banking', roles: PREPARER, requiresConfirmation: false, category: 'post' },
+  { actionId: 'bank-rule.delete', label: 'Delete rule', objectTypeId: 'client-organisation', capabilityId: 'banking', roles: PREPARER, requiresConfirmation: true, category: 'edit' },
+  { actionId: 'bank.reconcile', label: 'Complete reconciliation', objectTypeId: 'client-organisation', capabilityId: 'banking', roles: PREPARER, requiresConfirmation: true, category: 'workflow' },
+  { actionId: 'bank.sign-off', label: 'Sign off reconciliation', objectTypeId: 'client-organisation', capabilityId: 'banking', roles: REVIEWER, requiresConfirmation: true, category: 'workflow' },
 ];
 
 export function objectTypeModel(objectTypeId: string): ObjectTypeModel | undefined {

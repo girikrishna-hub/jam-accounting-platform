@@ -565,3 +565,10 @@ export async function expenseDetail(db: Pick<Db, 'query'>, orgId: string, e: Exp
 }
 
 export const EXPENSE_TAX_CODES = TAX_CODES.map((t) => (t.code === 'OUT' ? { ...t, label: 'Outside scope / no GCT' } : t));
+
+/** The total an expense input would record (net + GCT), without saving anything. */
+export function expenseTotalOf(raw: unknown): bigint {
+  const { record: _record, ...rest } = z.object({ record: z.boolean().optional() }).passthrough().parse(raw);
+  const input = ExpenseInput.parse(rest);
+  return totalsOf(buildLines(input), input.receiptOnFile).total;
+}
