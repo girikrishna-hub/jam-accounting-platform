@@ -8,7 +8,7 @@ import { WorkspaceToolsProvider } from '../workspace/tools.tsx';
 import { workspacePath } from '../../../shared/workspace-model.ts';
 
 const confirmedByPanel = async () => true;
-const TYPE_LABEL: Record<string, string> = { account: 'Account', period: 'Period', journal: 'Journal', customer: 'Customer', 'fee-note': 'Fee note' };
+const TYPE_LABEL: Record<string, string> = { account: 'Account', period: 'Period', journal: 'Journal', customer: 'Customer', 'fee-note': 'Fee note', supplier: 'Supplier', expense: 'Expense' };
 
 /** Opens one object workspace from a deep link. The server re-resolves and re-authorises it. */
 export function WorkspacePage(props: { orgId: string; objectTypeId: string; objectId: string; capabilityId?: string }) {

@@ -11,8 +11,8 @@ export const APPLICATION_ID = 'jam-accounting';
 export type Role = 'accountant' | 'reviewer' | 'client_viewer';
 export const ROLES: readonly Role[] = ['accountant', 'reviewer', 'client_viewer'];
 
-export type ObjectTypeId = 'client-organisation' | 'account' | 'period' | 'journal' | 'customer' | 'fee-note';
-export const OBJECT_TYPE_IDS: readonly ObjectTypeId[] = ['client-organisation', 'account', 'period', 'journal', 'customer', 'fee-note'];
+export type ObjectTypeId = 'client-organisation' | 'account' | 'period' | 'journal' | 'customer' | 'fee-note' | 'supplier' | 'expense';
+export const OBJECT_TYPE_IDS: readonly ObjectTypeId[] = ['client-organisation', 'account', 'period', 'journal', 'customer', 'fee-note', 'supplier', 'expense'];
 
 export interface CapabilityModel {
   readonly capabilityId: string;
@@ -73,6 +73,7 @@ export const OBJECT_TYPES: readonly ObjectTypeModel[] = [
       { capabilityId: 'chart-of-accounts', label: 'Chart of accounts', order: 30, roles: ALL, actionIds: ['coa.import', 'opening-balances.post'] },
       { capabilityId: 'journals', label: 'Journals', order: 35, roles: ALL, actionIds: ['journal.create'] },
       { capabilityId: 'receivables', label: 'Receivables', order: 37, roles: STAFF, actionIds: ['receivables.settings', 'customer.create', 'fee-note.create', 'receipt.record', 'receipt.reassign'] },
+      { capabilityId: 'payables', label: 'Expenses', order: 38, roles: STAFF, actionIds: ['payables.settings', 'supplier.create', 'expense.create', 'supplier-payment.record'] },
       { capabilityId: 'periods', label: 'Periods', order: 40, roles: STAFF, actionIds: ['period.open'] },
       { capabilityId: 'trial-balance', label: 'Trial balance', order: 50, roles: ALL, actionIds: [] },
       { capabilityId: 'activity', label: 'Activity', order: 60, roles: ALL, actionIds: [] },
@@ -179,6 +180,44 @@ export const OBJECT_TYPES: readonly ObjectTypeModel[] = [
       { capabilityId: 'settlement', label: 'Payments and credits', order: 20, roles: STAFF, actionIds: [] },
     ],
   },
+  {
+    objectTypeId: 'supplier',
+    displayName: 'Supplier',
+    version: '1.0.0',
+    defaultCapabilityId: 'expenses',
+    metadataFields: [
+      { fieldId: 'owed', label: 'Owed to supplier' },
+      { fieldId: 'spent', label: 'Spent this year' },
+      { fieldId: 'trn', label: 'TRN' },
+      { fieldId: 'status', label: 'Status' },
+    ],
+    headerFieldIds: ['trn'],
+    summaryFieldIds: ['owed', 'spent'],
+    statusFieldId: 'status',
+    capabilities: [
+      { capabilityId: 'expenses', label: 'Expenses and payments', order: 10, roles: STAFF, actionIds: [] },
+      { capabilityId: 'details', label: 'Details', order: 20, roles: STAFF, actionIds: ['supplier.update'] },
+    ],
+  },
+  {
+    objectTypeId: 'expense',
+    displayName: 'Expense',
+    version: '1.0.0',
+    defaultCapabilityId: 'details',
+    metadataFields: [
+      { fieldId: 'supplier', label: 'Supplier' },
+      { fieldId: 'date', label: 'Date' },
+      { fieldId: 'total', label: 'Total' },
+      { fieldId: 'settlement', label: 'Paid' },
+      { fieldId: 'status', label: 'Status' },
+    ],
+    headerFieldIds: ['supplier', 'date'],
+    summaryFieldIds: ['total', 'settlement'],
+    statusFieldId: 'status',
+    capabilities: [
+      { capabilityId: 'details', label: 'Expense', order: 10, roles: STAFF, actionIds: ['expense.update', 'expense.record', 'expense.discard', 'expense.cancel'] },
+    ],
+  },
 ];
 
 export const ACTIONS: readonly ActionModel[] = [
@@ -210,6 +249,16 @@ export const ACTIONS: readonly ActionModel[] = [
   { actionId: 'fee-note.allocate', label: 'Allocate payment', objectTypeId: 'fee-note', capabilityId: 'details', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
   { actionId: 'fee-note.apply-retainer', label: 'Apply retainer', objectTypeId: 'fee-note', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
   { actionId: 'fee-note.credit', label: 'Issue credit note', objectTypeId: 'fee-note', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
+  // Slice 3b: payables and expenses
+  { actionId: 'payables.settings', label: 'Save expense settings', objectTypeId: 'client-organisation', capabilityId: 'payables', roles: PREPARER, requiresConfirmation: false, category: 'control' },
+  { actionId: 'supplier.create', label: 'Add supplier', objectTypeId: 'client-organisation', capabilityId: 'payables', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'expense.create', label: 'New expense', objectTypeId: 'client-organisation', capabilityId: 'payables', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'supplier-payment.record', label: 'Pay supplier', objectTypeId: 'client-organisation', capabilityId: 'payables', roles: PREPARER, requiresConfirmation: false, category: 'post' },
+  { actionId: 'supplier.update', label: 'Save supplier', objectTypeId: 'supplier', capabilityId: 'details', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'expense.update', label: 'Save expense', objectTypeId: 'expense', capabilityId: 'details', roles: PREPARER, requiresConfirmation: false, category: 'edit' },
+  { actionId: 'expense.record', label: 'Record expense', objectTypeId: 'expense', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
+  { actionId: 'expense.discard', label: 'Discard draft', objectTypeId: 'expense', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'edit' },
+  { actionId: 'expense.cancel', label: 'Cancel expense', objectTypeId: 'expense', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
 ];
 
 export function objectTypeModel(objectTypeId: string): ObjectTypeModel | undefined {
@@ -239,4 +288,4 @@ export function workspacePath(orgId: string, objectTypeId: string, objectId: str
   return '/' + parts.map(encodeURIComponent).join('/');
 }
 
-export const WORKSPACE_PATH_PATTERN = /^\/c\/([0-9a-f-]{36})\/(client-organisation|account|period|journal|customer|fee-note)\/([A-Za-z0-9_.:-]{1,128})(?:\/([a-z-]{1,64}))?$/;
+export const WORKSPACE_PATH_PATTERN = /^\/c\/([0-9a-f-]{36})\/(client-organisation|account|period|journal|customer|fee-note|supplier|expense)\/([A-Za-z0-9_.:-]{1,128})(?:\/([a-z-]{1,64}))?$/;

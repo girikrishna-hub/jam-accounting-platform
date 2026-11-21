@@ -159,3 +159,11 @@ table.lines input.num { text-align: right; }
   .print-doc { position: absolute; left: 0; top: 0; width: 100%; max-width: none; border: 0; }
   .no-print { display: none !important; }
 }
+
+/* ---------- Slice 3b: expenses ---------- */
+.expense-editor table.lines select { min-width: 160px; }
+.expense-editor label.check { flex-direction: row; align-items: center; gap: 0.4rem; align-self: flex-end; }
+.flag { display: inline-block; margin-left: 0.35rem; padding: 0 0.4rem; border-radius: 999px; font-size: 0.72rem; background: #fff4e0; color: #8a5300; border: 1px solid #f0d29a; }
+.expense-view dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0 0 0.75rem; }
+.expense-view dl.facts dt { color: var(--muted, #667); }
+.expense-view dl.facts dd { margin: 0; }

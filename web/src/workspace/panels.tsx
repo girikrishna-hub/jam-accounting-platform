@@ -7,6 +7,7 @@ import type { ActionFeedback } from './feedback.ts';
 import { ErrorText, Loading, Notice, ROLE_LABEL, hasAction, readFileText, useAction, useData, useFlash, useWorkspaceTools } from './tools.tsx';
 import { ClientJournals, JournalLines, JournalReview } from './journal-panels.tsx';
 import { ClientReceivables, CustomerDetails, CustomerFeeNotes, CustomerStatement, FeeNoteDetails, FeeNoteSettlement } from './receivables-panels.tsx';
+import { ClientExpenses, ExpenseDetails, SupplierDetails, SupplierExpenses } from './payables-panels.tsx';
 
 interface Account {
   accountId: string; code: string; name: string; type: string; normalBalance: 'debit' | 'credit';
@@ -398,4 +399,8 @@ export const PANELS: CapabilityPanels = {
   'customer/details': CustomerDetails,
   'fee-note/details': FeeNoteDetails,
   'fee-note/settlement': FeeNoteSettlement,
+  'client-organisation/payables': ClientExpenses,
+  'supplier/expenses': SupplierExpenses,
+  'supplier/details': SupplierDetails,
+  'expense/details': ExpenseDetails,
 };
