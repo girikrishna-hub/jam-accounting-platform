@@ -15,6 +15,9 @@ import {
   allocateReceipt, applyRetainer, createCustomer, createFeeNote, discardFeeNote, issueCreditNote, issueFeeNote, reassignReceipt,
   recordReceipt, saveSettings, updateCustomer, updateFeeNote,
 } from '../services/receivables.ts';
+import {
+  cancelExpense, createExpense, createSupplier, discardExpense, recordExpense, recordSupplierPayment, savePayableSettings, updateExpense, updateSupplier,
+} from '../services/payables.ts';
 import { resolveObject } from './objects.ts';
 import { audit } from '../audit.ts';
 
@@ -84,6 +87,16 @@ const HANDLERS: Record<string, Handler> = {
   'fee-note.credit': async (ctx, scope, id, input) => issueCreditNote(ctx, scope, id, input),
   'receipt.record': async (ctx, scope, _id, input) => recordReceipt(ctx, scope, input),
   'receipt.reassign': async (ctx, scope, _id, input) => reassignReceipt(ctx, scope, input),
+  // Slice 3b: payables and expenses
+  'payables.settings': async (ctx, scope, _id, input) => savePayableSettings(ctx, scope, input),
+  'supplier.create': async (ctx, scope, _id, input) => createSupplier(ctx, scope, input),
+  'supplier.update': async (ctx, scope, id, input) => updateSupplier(ctx, scope, id, input),
+  'expense.create': async (ctx, scope, _id, input) => createExpense(ctx, scope, input),
+  'expense.update': async (ctx, scope, id, input) => updateExpense(ctx, scope, id, input),
+  'expense.record': async (ctx, scope, id) => recordExpense(ctx, scope, id),
+  'expense.discard': async (ctx, scope, id) => discardExpense(ctx, scope, id),
+  'expense.cancel': async (ctx, scope, id, input) => cancelExpense(ctx, scope, id, input),
+  'supplier-payment.record': async (ctx, scope, _id, input) => recordSupplierPayment(ctx, scope, input),
 };
 
 export interface ExecuteRequest {

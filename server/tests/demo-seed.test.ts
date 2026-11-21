@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { seedDemo } from '../src/demo/seed.ts';
 import { getOrganisation } from '../src/services/organisations.ts';
 import { controlCheck, customerBalances, feeNoteSummaries, getSettings, receiptSummaries } from '../src/services/receivables.ts';
+import { expenseSummaries, getPayableSettings, payablesControl } from '../src/services/payables.ts';
 import { setup, type Harness } from './helpers.ts';
 
 /** The demo seed loads Harbourview's January receivables to match the sample data pack's registers. */
@@ -38,19 +39,34 @@ describe('demo seed: January receivables', () => {
     expect(bf.balance).toBe(String(3194088000n - 207000000n));
   });
 
+  it('records 13 January expenses matching the register, flags two and keeps the loan instalment as a draft', async () => {
+    const expenses = (await expenseSummaries(h.db, h.orgs.harbourview)).filter((e) => !e.broughtForward);
+    const recorded = expenses.filter((e) => e.state === 'paid');
+    expect(recorded).toHaveLength(13);
+    expect(recorded.map((e) => e.number).sort()[0]).toBe('EX-26-0001');
+    expect(recorded.reduce((t, e) => t + BigInt(e.total), 0n)).toBe(282074272n);
+    expect(recorded.reduce((t, e) => t + BigInt(e.gct), 0n)).toBe(10450340n); // input GCT claimed
+    const flagged = Object.fromEntries(expenses.filter((e) => e.flags.length).map((e) => [e.supplierName, e.flags.map((f) => f.code)]));
+    expect(flagged).toEqual({ 'TotalEnergies Half Way Tree': ['no-receipt'], 'Supreme Court Registry': ['matter'], 'NCB Motor Loan': ['waiting'] });
+    const control = await payablesControl({ db: h.db, ledger: h.ledger }, scope, (await getPayableSettings(h.db, h.orgs.harbourview))!);
+    expect(control).toEqual({ account: '2000', subledger: '421566000', ledger: '421566000', difference: '0' });
+  });
+
   it('is safe to run again', async () => {
     const logs: string[] = [];
     await seedDemo(h.db, h.ledger, 'Demo-Password-2026', (l) => logs.push(l));
     expect(logs).toContain('January receivables already loaded.');
+    expect(logs).toContain('January expenses already loaded.');
     expect((await feeNoteSummaries(h.db, h.orgs.harbourview)).length).toBe(13);
   });
 
   it('skips without failing when January is not open', async () => {
     const logs: string[] = [];
-    await h.db.query("DELETE FROM app.allocations; DELETE FROM app.receipts; DELETE FROM app.fee_notes WHERE NOT brought_forward");
+    await h.db.query("DELETE FROM app.allocations; DELETE FROM app.receipts; DELETE FROM app.fee_notes WHERE NOT brought_forward; DELETE FROM app.expenses WHERE NOT brought_forward");
     const closed = Object.assign(Object.create(h.ledger) as typeof h.ledger, { listPeriods: async () => [{ startDate: '2026-01-01', endDate: '2026-01-31', state: 'closed' }] });
     await seedDemo(h.db, closed, 'Demo-Password-2026', (l) => logs.push(l));
     expect(logs).toContain('January receivables not loaded: January 2026 is not open.');
+    expect(logs).toContain('January expenses not loaded: January 2026 is not open.');
   });
 
 });

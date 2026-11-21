@@ -9,6 +9,10 @@ import {
   TAX_CODE_OPTIONS, ageing, completePending, controlCheck, customerBalances, customerStatement, feeNoteDetail, feeNoteSummaries,
   getCustomer, getFeeNote, getSettings, practiceAreas, receiptSummaries,
 } from '../../services/receivables.ts';
+import {
+  EXPENSE_TAX_CODES, completePendingPayables, expenseDetail, expenseSummaries, getExpense, getPayableSettings, getSupplier, payablesControl,
+  supplierBalances, supplierPayments,
+} from '../../services/payables.ts';
 
 const STATUSES = ['draft', 'submitted', 'returned', 'approved', 'posted', 'discarded', 'reversed'] as const;
 
@@ -219,6 +223,54 @@ export function orgRoutes(ctx: AppContext): Router {
       customers: customers.filter((c) => c.kind === 'customer' && c.status === 'active').map((c) => ({ id: c.id, name: c.name })),
       taxCodes: TAX_CODE_OPTIONS,
     });
+  });
+
+  // ---------- Slice 3b: payables and expenses ----------
+
+  const accountOptions = async (scope: ReturnType<typeof scopeOf>) => (await ctx.ledger.listAccounts(scope.actor)).filter((a) => a.active)
+    .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }))
+    .map((a) => ({ code: a.code, name: a.name, type: a.type, classification: a.classification ?? null }));
+  const activeSuppliers = async (orgId: string) => (await supplierBalances(ctx.db, orgId, new Date().getUTCFullYear()))
+    .filter((s) => s.kind === 'supplier' && s.status === 'active').map((s) => ({ id: s.id, name: s.name }));
+
+  r.get('/payables', async (_req, res) => {
+    const scope = scopeOf(res);
+    await clientCapability(ctx, res, 'payables');
+    await completePendingPayables(ctx, scope);
+    const settings = await getPayableSettings(ctx.db, scope.org.id);
+    const accounts = await accountOptions(scope);
+    if (!settings?.set_up_at) {
+      res.json({ currency: scope.org.currency, setUp: false, settings, accounts, taxCodes: EXPENSE_TAX_CODES });
+      return;
+    }
+    const [suppliers, expenses, payments, control] = await Promise.all([
+      supplierBalances(ctx.db, scope.org.id, new Date().getUTCFullYear()), expenseSummaries(ctx.db, scope.org.id),
+      supplierPayments(ctx.db, scope.org.id), payablesControl(ctx, scope, settings),
+    ]);
+    res.json({ currency: scope.org.currency, setUp: true, settings, accounts, taxCodes: EXPENSE_TAX_CODES, suppliers, expenses, payments, control });
+  });
+
+  r.get('/suppliers/:supplierId', async (req, res) => {
+    const scope = scopeOf(res);
+    const supplierId = z.string().uuid().parse(req.params.supplierId);
+    await requireAllowed(ctx, scope, 'supplier', supplierId, 'capability.expenses.view');
+    const supplier = await getSupplier(ctx.db, scope.org.id, supplierId);
+    if (!supplier) throw notFound();
+    const [expenses, payments, balances] = await Promise.all([
+      expenseSummaries(ctx.db, scope.org.id, supplierId), supplierPayments(ctx.db, scope.org.id, supplierId),
+      supplierBalances(ctx.db, scope.org.id, new Date().getUTCFullYear()),
+    ]);
+    res.json({ currency: scope.org.currency, supplier, balance: balances.find((b) => b.id === supplierId), expenses, payments });
+  });
+
+  r.get('/expenses/:expenseId', async (req, res) => {
+    const scope = scopeOf(res);
+    const expenseId = z.string().uuid().parse(req.params.expenseId);
+    await requireAllowed(ctx, scope, 'expense', expenseId, 'capability.details.view');
+    const e = await getExpense(ctx.db, scope.org.id, expenseId);
+    if (!e || e.status === 'discarded') throw notFound();
+    const [detail, suppliers, accounts] = await Promise.all([expenseDetail(ctx.db, scope.org.id, e), activeSuppliers(scope.org.id), accountOptions(scope)]);
+    res.json({ currency: scope.org.currency, ...detail, suppliers, accounts, taxCodes: EXPENSE_TAX_CODES });
   });
 
   return r;

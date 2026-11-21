@@ -5,6 +5,7 @@ import { isAllowed } from '../access/checks.ts';
 import type { ResourceType } from '../access/authority.ts';
 import { VISIBLE_TO_CLIENT, getJournal, listJournals, type JournalRow } from '../services/journals.ts';
 import { customerBalances, feeNoteSummaries, getCustomer, getFeeNote, feeNoteOutstanding } from '../services/receivables.ts';
+import { expenseSummaries, getExpense, getSupplier, supplierBalances, type ExpenseSummary, type SupplierBalance } from '../services/payables.ts';
 
 export type MetadataValue = string | number | boolean | null;
 
@@ -18,7 +19,7 @@ export interface Projection {
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const ROLE_LABEL: Record<Role, string> = { accountant: 'Accountant', reviewer: 'Reviewer', client_viewer: 'Client viewer' };
 
-const OBJECT_TYPES = new Set(['client-organisation', 'account', 'period', 'journal', 'customer', 'fee-note']);
+const OBJECT_TYPES = new Set(['client-organisation', 'account', 'period', 'journal', 'customer', 'fee-note', 'supplier', 'expense']);
 
 /** Whether the Authorization Runtime lets this user open a workspace on this object. */
 export function mayOpen(ctx: AppContext, scope: OrgScope, objectTypeId: string, objectId: string): Promise<boolean> {
@@ -90,6 +91,18 @@ export async function resolveObject(ctx: AppContext, scope: OrgScope, objectType
       },
     };
   }
+  if (objectTypeId === 'supplier') {
+    const supplier = await getSupplier(ctx.db, org.id, objectId);
+    if (!supplier) return null;
+    const b = (await supplierBalances(ctx.db, org.id, new Date().getUTCFullYear())).find((x) => x.id === supplier.id)!;
+    return supplierProjection(org.currency, b);
+  }
+  if (objectTypeId === 'expense') {
+    const e = await getExpense(ctx.db, org.id, objectId);
+    if (!e || e.status === 'discarded') return null;
+    const summary = (await expenseSummaries(ctx.db, org.id, e.supplier_id)).find((x) => x.id === e.id)!;
+    return expenseProjection(org.currency, summary);
+  }
   if (objectTypeId === 'period') {
     const period = (await ledger.listPeriods(scope.actor)).find((p) => p.periodId === objectId);
     if (!period) return null;
@@ -152,7 +165,40 @@ export async function searchObjects(ctx: AppContext, scope: OrgScope, query: str
       }
     }
   }
+  if (await wants('supplier')) {
+    for (const b of await supplierBalances(ctx.db, scope.org.id, new Date().getUTCFullYear())) {
+      if (results.length >= limit) break;
+      if (b.name.toLowerCase().includes(q)) results.push(supplierProjection(scope.org.currency, b));
+    }
+  }
+  if (await wants('expense')) {
+    for (const e of await expenseSummaries(ctx.db, scope.org.id)) {
+      if (results.length >= limit) break;
+      if ((e.number ?? '').toLowerCase().includes(q) || e.supplierName.toLowerCase().includes(q) || e.supplierInvoice.toLowerCase().includes(q) || e.description.toLowerCase().includes(q)) {
+        results.push(expenseProjection(scope.org.currency, e));
+      }
+    }
+  }
   return results.slice(0, limit);
+}
+
+const EXPENSE_STATE = { draft: 'draft', recording: 'recording', paid: 'paid', owed: 'owed', 'part-paid': 'part-paid', settled: 'settled', cancelled: 'cancelled' } as const;
+
+function supplierProjection(currency: string, b: SupplierBalance): Projection {
+  return {
+    objectTypeId: 'supplier', objectId: b.id, displayName: b.name,
+    metadata: { owed: `${currency} ${formatMinor(b.owed)}`, spent: `${currency} ${formatMinor(b.spent)}`, trn: b.trn || '—', status: b.kind === 'supplier' ? b.status : 'system account' },
+  };
+}
+
+function expenseProjection(currency: string, e: ExpenseSummary): Projection {
+  return {
+    objectTypeId: 'expense', objectId: e.id, displayName: e.broughtForward ? 'Owed to suppliers brought forward' : e.number ? `Expense ${e.number}` : 'Draft expense',
+    metadata: {
+      supplier: e.supplierName, date: e.date, total: `${currency} ${formatMinor(e.total)}`,
+      settlement: e.settlement === 'paid' ? 'Paid at once' : `Owed: ${currency} ${formatMinor(e.outstanding)}`, status: EXPENSE_STATE[e.state],
+    },
+  };
 }
 
 const KIND_LABEL = { standard: 'Journal', opening: 'Opening balances', reversal: 'Reversal' } as const;

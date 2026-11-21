@@ -15,6 +15,7 @@ import type { Role } from '../../../shared/workspace-model.ts';
 import {
   allocateReceipt, applyRetainer, createCustomer, createFeeNote, feeNoteSummaries, getSettings, issueFeeNote, recordReceipt, saveSettings,
 } from '../services/receivables.ts';
+import { createExpense, createSupplier, getPayableSettings, savePayableSettings } from '../services/payables.ts';
 
 export async function seedDemo(db: Db, ledger: LedgerGateway, password: string, log: (line: string) => void = console.log): Promise<void> {
   const seedDir = fileURLToPath(new URL('../../../seed/harbourview/', import.meta.url));
@@ -73,6 +74,11 @@ export async function seedDemo(db: Db, ledger: LedgerGateway, password: string, 
     await seedJanuaryReceivables(db, ledger, { org: { ...harbourview, ledger_id: harbourview.ledger_id! }, role: 'accountant', actor }, log);
   } catch (e) {
     log(`January receivables not loaded: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  try {
+    await seedJanuaryExpenses(db, ledger, { org: { ...harbourview, ledger_id: harbourview.ledger_id! }, role: 'accountant', actor }, log);
+  } catch (e) {
+    log(`January expenses not loaded: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   log('\nDemo users (password = DEMO_PASSWORD):');
@@ -165,4 +171,61 @@ async function seedJanuaryReceivables(db: Db, ledger: LedgerGateway, scope: Scop
   }
   await applyRetainer(ctx, scope, notes.get('FN-2026-0005')!, { receiptId: retainerId, amount: '1500000.00' });
   log(`January receivables: ${FEE_NOTES.length} fee notes issued, ${RECEIPTS.length} office receipts recorded`);
+}
+
+// ---------- January 2026 expenses (sample data pack: TX_Expenses) ----------
+
+interface DemoExpense {
+  date: string; supplier: string; trn?: string; description: string; account: string; net: string; gct?: string; tax?: 'GCT15' | 'EXEMPT' | 'OUT';
+  paidFrom: string; method: string; ref?: string; receipt?: false; matter?: string; foreign?: string;
+}
+
+/** 13 expenses recorded as paid at once (input GCT to 1160). Rent and insurance carry no GCT; LexisNexis is a foreign service. */
+const EXPENSES: DemoExpense[] = [
+  { date: '2026-01-02', supplier: 'Office Depot Kingston', trn: '000-xxx-112', description: 'Stationery & toner', account: '5320', net: '16028.26', paidFrom: '1000', method: 'POS – NCB' },
+  { date: '2026-01-03', supplier: 'J. Landlord Properties Ltd', trn: '000-xxx-458', description: 'Office rent – January', account: '5100', net: '1200000.00', tax: 'EXEMPT', paidFrom: '1000', method: 'Cheque', ref: '004812' },
+  { date: '2026-01-05', supplier: 'Jamaica Public Service (JPS)', trn: '000-xxx-001', description: 'Electricity – Dec usage', account: '5110', net: '277078.45', paidFrom: '1000', method: 'ACH' },
+  { date: '2026-01-05', supplier: 'Flow Business', trn: '000-xxx-203', description: 'Internet & landlines', account: '5300', net: '80100.00', paidFrom: '1000', method: 'ACH' },
+  { date: '2026-01-08', supplier: 'National Water Commission (NWC)', trn: '000-xxx-009', description: 'Water', account: '5120', net: '30417.39', paidFrom: '1000', method: 'ACH' },
+  { date: '2026-01-16', supplier: 'Supreme Court Registry', description: 'Filing fees – claim', account: '1120', net: '14500.00', tax: 'OUT', paidFrom: '1000', method: 'Cheque', ref: '004813' },
+  // No receipt: no input GCT claimed; the bank's 12,800.00 is used (the register shows 12,799.99).
+  { date: '2026-01-19', supplier: 'TotalEnergies Half Way Tree', trn: '000-xxx-771', description: 'Fuel – partner vehicle', account: '5330', net: '11130.43', gct: '1669.57', paidFrom: '1000', method: 'POS – NCB', receipt: false },
+  { date: '2026-01-21', supplier: 'Digicel Business', trn: '000-xxx-302', description: 'Mobile plans', account: '5300', net: '53347.83', paidFrom: '1000', method: 'ACH' },
+  { date: '2026-01-22', supplier: 'LexisNexis', description: 'Legal research subscription', account: '5220', net: '392250.00', tax: 'OUT', paidFrom: '1000', method: 'FX purchase', foreign: 'USD 2,500.00 at 156.90' },
+  { date: '2026-01-24', supplier: 'Courier Express JA', trn: '000-xxx-650', description: 'Courier – documents to Montego Bay', account: '1120', net: '4500.00', paidFrom: '1020', method: 'Petty cash', matter: 'M-0405' },
+  { date: '2026-01-27', supplier: 'Secure Guard JA Ltd', trn: '000-xxx-889', description: 'Security services – January', account: '5130', net: '165217.39', paidFrom: '1000', method: 'Cheque', ref: '004814' },
+  { date: '2026-01-28', supplier: 'PI Insurer', trn: '000-xxx-120', description: 'Professional indemnity – monthly', account: '5200', net: '400000.00', tax: 'EXEMPT', paidFrom: '1000', method: 'Direct debit' },
+  { date: '2026-01-29', supplier: 'Valuation surveyor', trn: '000-xxx-347', description: 'Valuation – Estate of A.R. property', account: '1120', net: '70000.00', paidFrom: '1000', method: 'Cheque', ref: '004815', matter: 'M-0411' },
+];
+
+async function seedJanuaryExpenses(db: Db, ledger: LedgerGateway, scope: Scope, log: (line: string) => void): Promise<void> {
+  const ctx = { db, ledger };
+  const loaded = await db.query(`SELECT 1 FROM app.expenses WHERE org_id = $1 AND NOT brought_forward LIMIT 1`, [scope.org.id]);
+  if (loaded.rowCount) { log('January expenses already loaded.'); return; }
+  const january = (await ledger.listPeriods(scope.actor)).find((p) => p.startDate === '2026-01-01');
+  if (january?.state !== 'open') { log('January expenses not loaded: January 2026 is not open.'); return; }
+  if (!(await getPayableSettings(db, scope.org.id))?.set_up_at) {
+    const set = await savePayableSettings(ctx, scope, { payableAccount: '2000', inputGctAccount: '1160', disbursementAccount: '1120' });
+    log(`Expenses set up; owed to suppliers brought forward ${set.broughtForward}`);
+  }
+  const suppliers = new Map<string, string>();
+  const supplier = async (name: string, trn = '') => {
+    if (!suppliers.has(name)) suppliers.set(name, (await createSupplier(ctx, scope, { name, trn })).id);
+    return suppliers.get(name)!;
+  };
+  for (const e of EXPENSES) {
+    await createExpense(ctx, scope, {
+      supplierId: await supplier(e.supplier, e.trn), expenseDate: e.date, description: e.description, settlement: 'paid', paidFrom: e.paidFrom,
+      paymentMethod: e.method, paymentRef: e.ref ?? '', receiptOnFile: e.receipt ?? true, foreignAmount: e.foreign ?? '',
+      lines: [{ account: e.account, description: e.description, net: e.net, gct: e.gct ?? '', taxCode: e.tax ?? 'GCT15', matterRef: e.matter ?? '' }],
+      record: true,
+    });
+  }
+  // Waiting for the principal / interest split from NCB's loan statement: kept as a draft, nothing posted.
+  await createExpense(ctx, scope, {
+    supplierId: await supplier('NCB Motor Loan'), expenseDate: '2026-01-26', description: 'Loan instalment (principal + interest)', settlement: 'paid', paidFrom: '1000',
+    paymentMethod: 'ACH', notes: 'Waiting for the principal / interest split from the NCB loan statement.',
+    lines: [{ account: '2500', description: 'Loan instalment – split principal (2500) and interest (5410)', net: '318400.00', taxCode: 'OUT' }],
+  });
+  log(`January expenses: ${EXPENSES.length} recorded, 1 draft waiting for information`);
 }
