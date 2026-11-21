@@ -23,20 +23,23 @@ describe('demo seed: January receivables', () => {
     expect(notes.map((n) => n.number)).toEqual(Array.from({ length: 12 }, (_, i) => `FN-2026-${String(i + 1).padStart(4, '0')}`));
     expect(notes.reduce((t, n) => t + BigInt(n.total), 0n)).toBe(786270000n);
     const status = Object.fromEntries(notes.map((n) => [n.number, n.settlement]));
-    expect(status).toMatchObject({ 'FN-2026-0005': 'paid', 'FN-2026-0006': 'paid', 'FN-2026-0007': 'paid', 'FN-2026-0011': 'paid', 'FN-2026-0001': 'outstanding', 'FN-2026-0003': 'outstanding' });
+    // FN-2026-0001 and 0003 are paid by the transfers from the client account found on the bank statement.
+    expect(status).toMatchObject({ 'FN-2026-0005': 'paid', 'FN-2026-0006': 'paid', 'FN-2026-0007': 'paid', 'FN-2026-0011': 'paid', 'FN-2026-0001': 'paid', 'FN-2026-0003': 'paid', 'FN-2026-0002': 'outstanding' });
 
     const receipts = await receiptSummaries(h.db, h.orgs.harbourview);
-    expect(receipts).toHaveLength(8);
-    expect(receipts.reduce((t, r) => t + BigInt(r.amount), 0n)).toBe(542570000n); // office account total in TX_Receipts
-    expect(receipts.filter((r) => r.unidentified).map((r) => r.amount)).toEqual(['57500000']);
+    // 8 office receipts from TX_Receipts (5,425,700.00) and 6 found on the bank statement (10,996,100.00).
+    expect(receipts).toHaveLength(14);
+    expect(receipts.reduce((t, r) => t + BigInt(r.amount), 0n)).toBe(542570000n + 1099610000n);
+    expect(receipts.filter((r) => r.unidentified).map((r) => r.amount).sort()).toEqual(['57500000', '8360000']);
   });
 
   it('keeps the customer total in agreement with account 1100', async () => {
     const control = await controlCheck({ db: h.db, ledger: h.ledger }, scope, (await getSettings(h.db, h.orgs.harbourview))!);
-    // 31,940,880 b/f + 7,862,700 issued − 3,925,700 paid − 1,500,000 retainer applied
-    expect(control).toEqual({ account: '1100', subledger: '3437788000', ledger: '3437788000', difference: '0' });
+    // 31,940,880 b/f + 7,862,700 issued − 3,925,700 paid − 1,500,000 retainer applied (34,377,880),
+    // then − 10,912,500 paid per the bank statement − 83,600 unidentified WiPay.
+    expect(control).toEqual({ account: '1100', subledger: '2338178000', ledger: '2338178000', difference: '0' });
     const bf = (await customerBalances(h.db, h.orgs.harbourview)).find((c) => c.kind === 'brought_forward')!;
-    expect(bf.balance).toBe(String(3194088000n - 207000000n));
+    expect(bf.balance).toBe(String(3194088000n - 207000000n - 86250000n - 480000000n - 325000000n));
   });
 
   it('records 13 January expenses matching the register, flags two and keeps the loan instalment as a draft', async () => {
