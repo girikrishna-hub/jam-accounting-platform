@@ -16,10 +16,11 @@ import {
   allocateReceipt, applyRetainer, createCustomer, createFeeNote, feeNoteSummaries, getSettings, issueFeeNote, recordReceipt, saveSettings,
 } from '../services/receivables.ts';
 import { createExpense, createSupplier, getPayableSettings, savePayableSettings } from '../services/payables.ts';
+import { bankOverview, createFromLine, importStatement, matchLine } from '../services/banking.ts';
+
+const seedDir = fileURLToPath(new URL('../../../seed/harbourview/', import.meta.url));
 
 export async function seedDemo(db: Db, ledger: LedgerGateway, password: string, log: (line: string) => void = console.log): Promise<void> {
-  const seedDir = fileURLToPath(new URL('../../../seed/harbourview/', import.meta.url));
-
   async function user(email: string, displayName: string, isFirmAdmin = false): Promise<string> {
     const found = await db.query<{ id: string }>('SELECT id FROM app.users WHERE email = $1', [email]);
     if (found.rows[0]) return found.rows[0].id;
@@ -79,6 +80,11 @@ export async function seedDemo(db: Db, ledger: LedgerGateway, password: string, 
     await seedJanuaryExpenses(db, ledger, { org: { ...harbourview, ledger_id: harbourview.ledger_id! }, role: 'accountant', actor }, log);
   } catch (e) {
     log(`January expenses not loaded: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  try {
+    await seedJanuaryBank(db, ledger, { org: { ...harbourview, ledger_id: harbourview.ledger_id! }, role: 'accountant', actor }, log);
+  } catch (e) {
+    log(`January bank statement not loaded: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   log('\nDemo users (password = DEMO_PASSWORD):');
@@ -228,4 +234,72 @@ async function seedJanuaryExpenses(db: Db, ledger: LedgerGateway, scope: Scope, 
     lines: [{ account: '2500', description: 'Loan instalment – split principal (2500) and interest (5410)', net: '318400.00', taxCode: 'OUT' }],
   });
   log(`January expenses: ${EXPENSES.length} recorded, 1 draft waiting for information`);
+}
+
+// ---------- January 2026 bank statement (sample data pack: TX_BankStatement) ----------
+
+/**
+ * Imports January's NCB statement and works most of it, leaving a short hands-on list for testers:
+ * the two-cheque lodgement (the app suggests both receipts), the three partner drawings and the two bank
+ * charges (rules suggest the account). The loan instalment stays unentered (waiting for its split) and
+ * cheque 004815 to the valuation surveyor stays unpresented.
+ */
+async function seedJanuaryBank(db: Db, ledger: LedgerGateway, scope: Scope, log: (line: string) => void): Promise<void> {
+  const ctx = { db, ledger };
+  const loaded = await db.query('SELECT 1 FROM app.bank_statements WHERE org_id = $1 LIMIT 1', [scope.org.id]);
+  if (loaded.rowCount) { log('January bank statement already loaded.'); return; }
+  const january = (await ledger.listPeriods(scope.actor)).find((p) => p.startDate === '2026-01-01');
+  if (january?.state !== 'open') { log('January bank statement not loaded: January 2026 is not open.'); return; }
+  const receivables = await db.query('SELECT 1 FROM app.receipts WHERE org_id = $1 LIMIT 1', [scope.org.id]);
+  const payables = await db.query('SELECT 1 FROM app.expenses WHERE org_id = $1 AND NOT brought_forward LIMIT 1', [scope.org.id]);
+  if (!receivables.rowCount || !payables.rowCount) { log('January bank statement not loaded: January receipts and expenses are not loaded.'); return; }
+
+  await importStatement(ctx, scope, { accountCode: '1000', fileName: 'bank-statement-2026-01.csv', csv: await readFile(seedDir + 'bank-statement-2026-01.csv', 'utf8') });
+  // Rules the testers will see suggested.
+  for (const [text, account, description] of [['SERVICE CHARGE', '5400', 'Bank service charge'], ['GCT ON BANK CHARGES', '5400', 'GCT on bank charges (no tax invoice)']] as const) {
+    await db.query('INSERT INTO app.bank_rules (id, org_id, contains_text, target_account, description, created_by) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5) ON CONFLICT DO NOTHING',
+      [scope.org.id, text, account, description, scope.actor.actorId]);
+  }
+
+  const line = async (text: string) => (await bankOverview(ctx, scope, '1000')).lines.find((l) => l.description.includes(text))!;
+  const customer = async (name: string) => (await db.query<{ id: string }>('SELECT id FROM app.customers WHERE org_id = $1 AND name = $2', [scope.org.id, name])).rows[0]!.id;
+  const bf = (await db.query<{ customer_id: string; id: string }>('SELECT customer_id, id FROM app.fee_notes WHERE org_id = $1 AND brought_forward', [scope.org.id])).rows[0]!;
+  const feeNote = async (n: string) => (await db.query<{ id: string }>('SELECT id FROM app.fee_notes WHERE org_id = $1 AND number = $2', [scope.org.id, n])).rows[0]!.id;
+  const receiptEntry = async (amountMinor: string, method: string) => (await db.query<{ entry_id: string }>(
+    'SELECT entry_id FROM app.receipts WHERE org_id = $1 AND amount_minor = $2 AND method = $3', [scope.org.id, amountMinor, method])).rows[0]!.entry_id;
+
+  // 1. Accept the app's suggestion for every line already in the books, except the lodgement (left for testers).
+  const overview = await bankOverview(ctx, scope, '1000');
+  let matched = 0;
+  for (const l of overview.lines) {
+    if (!l.suggestion || l.description.includes('LODGEMENT')) continue;
+    await matchLine(ctx, scope, { lineId: l.id, entryIds: l.suggestion.entryIds });
+    matched += 1;
+  }
+  // 2. Fee notes from before the system, paid in January (against the brought-forward balance).
+  for (const [text, reference] of [
+    ['FEES FN-2025-1201', 'Transfer from client a/c - FN-2025-1201 (M-0317)'],
+    ['CARIB TELECOM', 'Carib Telecom Ltd - FN-2025-1240'],
+    ['BLUE MOUNTAIN RESORTS', 'Blue Mountain Resorts Ltd - 2 fee notes'],
+  ] as const) {
+    await createFromLine(ctx, scope, { lineId: (await line(text)).id, kind: 'receipt', customerId: bf.customer_id, allocateTo: bf.id, reference });
+  }
+  // 3. Transfers from the client account paying January fee notes (office side; the client side comes in 1b).
+  await createFromLine(ctx, scope, { lineId: (await line('FN-2026-0001')).id, kind: 'receipt', customerId: await customer('Client 0388'), allocateTo: await feeNote('FN-2026-0001'), reference: 'Transfer from client a/c - FN-2026-0001 (M-0388)' });
+  await createFromLine(ctx, scope, { lineId: (await line('FN-2026-0003')).id, kind: 'receipt', customerId: await customer('Client 0415'), allocateTo: await feeNote('FN-2026-0003'), reference: 'Transfer from client a/c - FN-2026-0003 (M-0415)' });
+  // 4. WiPay settlement: the two card receipts already recorded, plus 83,600 not yet identified.
+  const wipay = await line('WIPAY');
+  await matchLine(ctx, scope, { lineId: wipay.id, entryIds: [await receiptEntry('1725000', 'Card (WiPay)'), await receiptEntry('11345000', 'Card (WiPay)')] });
+  await createFromLine(ctx, scope, { lineId: wipay.id, kind: 'receipt', reference: 'WiPay settlement - not yet identified' });
+  // 5. Bank-only items.
+  for (const [text, account, description, flag, remember] of [
+    ['GCT RETURN DEC 2025', '2100', 'GCT return December 2025 paid to TAJ', '', 'TAJ ONLINE - GCT RETURN'],
+    ['S01 STATUTORY', '2110', 'S01 statutory deductions December paid to TAJ', '', 'TAJ ONLINE - S01'],
+    ['INTEREST CREDIT', '4500', 'Interest on operating account', '', 'INTEREST CREDIT'],
+    ['SALARIES 1ST HALF', '5000', 'Salaries 1st half January (net pay)', 'Payroll register needed', 'PAYROLL BATCH'],
+    ['SALARIES 2ND HALF', '5000', 'Salaries 2nd half January (net pay)', 'Payroll register needed', 'PAYROLL BATCH'],
+  ] as const) {
+    await createFromLine(ctx, scope, { lineId: (await line(text)).id, kind: 'entry', targetAccount: account, description, flag, remember });
+  }
+  log(`January bank statement: 33 lines imported; ${matched + 1} matched to entries already in the books, 10 entered from the bank, 6 left to work, 1 waiting (loan instalment)`);
 }

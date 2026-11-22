@@ -167,3 +167,16 @@ table.lines input.num { text-align: right; }
 .expense-view dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0 0 0.75rem; }
 .expense-view dl.facts dt { color: var(--muted, #667); }
 .expense-view dl.facts dd { margin: 0; }
+
+/* ---------- Slice 4: bank ---------- */
+.recon { border: 1px solid var(--line); border-radius: 8px; padding: 0.9rem; margin: 0.75rem 0; background: #fff; }
+.recon-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
+.recon-grid table { width: 100%; }
+.bank-lines { display: flex; flex-direction: column; gap: 0.4rem; }
+.bank-line { border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.7rem; background: #fff; }
+.bank-line.done { background: #f7faf8; }
+.bank-line-head { display: flex; gap: 0.75rem; align-items: baseline; flex-wrap: wrap; }
+.bank-line-head .date { min-width: 6.5rem; color: var(--muted); }
+.bank-line-head .desc { flex: 1; min-width: 14rem; }
+.bank-line-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.35rem; }
+.bank-line-actions .suggestion { display: inline-flex; gap: 0.5rem; align-items: center; background: #eef7f2; border-radius: 6px; padding: 0.2rem 0.5rem; }
