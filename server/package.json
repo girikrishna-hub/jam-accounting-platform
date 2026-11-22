@@ -21,7 +21,7 @@
     "@governedai-labs/identity-contracts": "1.3.0",
     "@governedai-labs/identity-orchestrator-runtime": "1.1.0",
     "express": "^5.1.0",
-    "fflate": "0.8.2",
+    "fflate": "0.8.3",
     "pdfkit": "0.20.2",
     "pg": "^8.22.0",
     "tsx": "^4.20.0",
