@@ -20,6 +20,22 @@ import {
   type TrialBalance,
 } from '@governedai-labs/bookkeeping-runtime';
 import { PostgresStorage } from '@governedai-labs/bookkeeping-runtime-postgres';
+import {
+  CallbackEventPublisher as StatementsEvents,
+  FinancialStatementsRuntime,
+  RuntimeError as StatementsError,
+  SystemClock as StatementsClock,
+  VerifierAuthorization as StatementsVerifier,
+  type IssuedStatement,
+  type IssuedStatementSummary,
+  type LayoutLine,
+  type Statement,
+  type StatementType,
+  type Verification,
+} from '@governedai-labs/financial-statements-runtime';
+import { PostgresStorage as StatementsStorage } from '@governedai-labs/financial-statements-runtime-postgres';
+import { BookkeepingLedgerSource } from '@governedai-labs/financial-statements-bookkeeping-source';
+import { BusinessRuleError } from '../services/rule-error.ts';
 import type pg from 'pg';
 import { issueDecision, makeDecisionVerifier } from '../access/decisions.ts';
 import { AccessDenied } from '../access/policy.ts';
@@ -48,6 +64,8 @@ export interface LedgerActor {
  * organisation record, never from the request.
  */
 export class LedgerGateway {
+  private statementsRuntime: FinancialStatementsRuntime | null = null;
+
   constructor(private readonly runtime: BookkeepingRuntime, private readonly signingKey: string, private readonly access: AccessAuthority) {}
 
   static async create(pool: pg.Pool, signingKey: string, access: AccessAuthority): Promise<LedgerGateway> {
@@ -60,11 +78,28 @@ export class LedgerGateway {
       authorization: new VerifierAuthorization(makeDecisionVerifier(signingKey)),
       clock: new SystemClock(),
     });
-    return new LedgerGateway(runtime, signingKey, access);
+    const gateway = new LedgerGateway(runtime, signingKey, access);
+    // The statements runtime reads the ledger through this gateway's Bookkeeping instance. It asks only for
+    // the four reads it needs; each statements call is first authorised for the user (statementsDecide), so
+    // these reads are issued to the statements service principal.
+    const statementsStorage = new StatementsStorage({ pool, schema: 'financial_statements' });
+    await statementsStorage.migrate();
+    gateway.statementsRuntime = new FinancialStatementsRuntime({
+      storage: statementsStorage,
+      events: new StatementsEvents(() => undefined),
+      authorization: new StatementsVerifier(makeDecisionVerifier(signingKey)),
+      clock: new StatementsClock(),
+      ledgerSource: new BookkeepingLedgerSource({
+        bookkeeping: runtime as never,
+        readDecision: (operation, ledgerId) => issueDecision(signingKey, { actorId: STATEMENTS_SERVICE, operation, ledgerId }),
+      }),
+    });
+    return gateway;
   }
 
   /** Drains the runtime's event outbox (no consumers yet). */
-  dispatchEvents(): Promise<unknown> {
+  async dispatchEvents(): Promise<unknown> {
+    await this.statementsRuntime?.dispatchEvents();
     return this.runtime.dispatchEvents();
   }
 
@@ -148,6 +183,14 @@ export class LedgerGateway {
     return this.runtime.openPeriod({ ...await this.command(a, 'bookkeeping.OpenPeriod'), startDate, endDate });
   }
 
+  async closePeriod(a: LedgerActor, periodId: string, requestId?: string): Promise<PeriodView> {
+    return this.runtime.closePeriod({ ...await this.command(a, 'bookkeeping.ClosePeriod', requestId), periodId });
+  }
+
+  async reopenPeriod(a: LedgerActor, periodId: string, reason: string, requestId?: string): Promise<PeriodView> {
+    return this.runtime.reopenPeriod({ ...await this.command(a, 'bookkeeping.ReopenPeriod', requestId), periodId, reason });
+  }
+
   listPeriods(a: LedgerActor): Promise<PeriodView[]> {
     return this.all(async (cursor) => this.runtime.listPeriods({ ...await this.query(a, 'bookkeeping.ListPeriods'), cursor }));
   }
@@ -211,4 +254,90 @@ export class LedgerGateway {
   listAuditRecords(a: LedgerActor): Promise<AuditRecordView[]> {
     return this.all(async (cursor) => this.runtime.listAuditRecords({ ...await this.query(a, 'bookkeeping.ListAuditRecords'), afterSequence: 0, cursor }));
   }
+
+  // ---- Statements (FinancialStatementsRuntime) ----
+
+  private get fs(): FinancialStatementsRuntime {
+    if (!this.statementsRuntime) throw new Error('Statements runtime not started');
+    return this.statementsRuntime;
+  }
+
+  /** Runs a statements call, turning the runtime's business errors into messages the screens can show. */
+  private async statements<T>(call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (e) {
+      if (!(e instanceof StatementsError)) throw e;
+      const code = e.code as string;
+      if (code === 'NotAuthorized') throw new AccessDenied(`statements: ${e.reason ?? ''}`);
+      const message = STATEMENT_MESSAGES[code];
+      if (message) throw new BusinessRuleError(code, typeof message === 'function' ? message(e.details) : message, e.details);
+      throw e;
+    }
+  }
+
+  async statementsRegistered(a: LedgerActor): Promise<boolean> {
+    try {
+      await this.fs.getLedgerSettings({ ...await this.query(a, 'financialStatements.GetLedgerSettings') });
+      return true;
+    } catch (e) {
+      if (e instanceof StatementsError && (e.code as string) === 'LedgerNotRegistered') return false;
+      throw e;
+    }
+  }
+
+  /** Registers the ledger for statements and saves its layouts as the defaults. Safe to repeat. */
+  async registerStatements(a: LedgerActor, input: { entityName: string; financialYearStartMonth: number; layouts: Record<StatementType, { name: string; lines: LayoutLine[] }> }): Promise<void> {
+    if (!(await this.statementsRegistered(a))) {
+      await this.statements(async () => this.fs.registerLedger({ ...await this.command(a, 'financialStatements.RegisterLedger', `fs-register:${a.ledgerId}`), entityName: input.entityName, financialYearStartMonth: input.financialYearStartMonth }));
+    }
+    for (const statementType of ['profitAndLoss', 'balanceSheet'] as const) {
+      const wanted = input.layouts[statementType];
+      const existing = (await this.statements(async () => this.fs.listLayouts({ ...await this.query(a, 'financialStatements.ListLayouts'), statementType }))).items
+        .find((l) => !l.template && l.name === wanted.name);
+      if (existing) continue;
+      const saved = await this.statements(async () => this.fs.saveLayout({ ...await this.command(a, 'financialStatements.SaveLayout', `fs-layout:${a.ledgerId}:${statementType}:${wanted.name}`), statementType, name: wanted.name, lines: wanted.lines }));
+      await this.statements(async () => this.fs.setDefaultLayout({ ...await this.command(a, 'financialStatements.SetDefaultLayout', `fs-default:${a.ledgerId}:${statementType}:${wanted.name}`), statementType, layoutId: saved.layoutId, layoutVersion: saved.version }));
+    }
+  }
+
+  async generateProfitAndLoss(a: LedgerActor, startDate: string, endDate: string): Promise<Statement> {
+    return this.statements(async () => this.fs.generateProfitAndLoss({ ...await this.query(a, 'financialStatements.GenerateProfitAndLoss'), startDate, endDate }));
+  }
+
+  async generateBalanceSheet(a: LedgerActor, date: string, comparativeDate?: string): Promise<Statement> {
+    return this.statements(async () => this.fs.generateBalanceSheet({ ...await this.query(a, 'financialStatements.GenerateBalanceSheet'), date, ...(comparativeDate ? { comparative: { date: comparativeDate } } : {}) }));
+  }
+
+  async issueStatement(a: LedgerActor, input: { statementType: StatementType; startDate?: string; endDate?: string; date?: string; comparativeDate?: string; replacesIssue?: number; reason?: string }, requestId?: string): Promise<IssuedStatement> {
+    const { comparativeDate, ...rest } = input;
+    return this.statements(async () => this.fs.issueStatement({ ...await this.command(a, 'financialStatements.IssueStatement', requestId), ...rest, ...(comparativeDate ? { comparative: { date: comparativeDate } } : {}) }));
+  }
+
+  async listIssuedStatements(a: LedgerActor): Promise<IssuedStatementSummary[]> {
+    return this.all(async (cursor) => this.statements(async () => this.fs.listIssuedStatements({ ...await this.query(a, 'financialStatements.ListIssuedStatements'), ...(cursor ? { cursor } : {}) })));
+  }
+
+  async getIssuedStatement(a: LedgerActor, statementType: StatementType, issueNumber: number): Promise<IssuedStatement> {
+    return this.statements(async () => this.fs.getIssuedStatement({ ...await this.query(a, 'financialStatements.GetIssuedStatement'), statementType, issueNumber }));
+  }
+
+  async verifyIssuedStatement(a: LedgerActor, statementType: StatementType, issueNumber: number): Promise<Verification> {
+    return this.statements(async () => this.fs.verifyIssuedStatement({ ...await this.query(a, 'financialStatements.VerifyIssuedStatement'), statementType, issueNumber }));
+  }
 }
+
+/** The principal the statements runtime's Bookkeeping reads are issued to. */
+export const STATEMENTS_SERVICE = 'service:financial-statements';
+
+const STATEMENT_MESSAGES: Record<string, string | ((details: unknown) => string)> = {
+  PeriodsOpen: 'A statement can only be issued once every month it covers is closed.',
+  UnmappedAccounts: (d) => `Some accounts are not on the statement layout: ${JSON.stringify(d)}.`,
+  InvalidPeriod: 'A profit and loss must fall within one financial year and inside the books.',
+  StatementDoesNotBalance: 'The statement does not balance. Please report this.',
+  LedgerDataInvalid: 'The ledger data could not be read for a statement. Please report this.',
+  ReissueMismatch: 'A replacement must cover the same statement and dates as the one it replaces.',
+  IssuedStatementNotFound: 'That issued statement does not exist.',
+  LedgerNotRegistered: 'Statements are not set up for this client yet.',
+  InvalidLayout: (d) => `The statement layout is not valid: ${JSON.stringify(d)}.`,
+};

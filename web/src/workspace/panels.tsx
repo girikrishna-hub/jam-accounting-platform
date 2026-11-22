@@ -9,6 +9,7 @@ import { ClientJournals, JournalLines, JournalReview } from './journal-panels.ts
 import { ClientReceivables, CustomerDetails, CustomerFeeNotes, CustomerStatement, FeeNoteDetails, FeeNoteSettlement } from './receivables-panels.tsx';
 import { ClientExpenses, ExpenseDetails, SupplierDetails, SupplierExpenses } from './payables-panels.tsx';
 import { ClientBank } from './bank-panels.tsx';
+import { Downloads, MonthEnd, Statements } from './month-end-panels.tsx';
 
 interface Account {
   accountId: string; code: string; name: string; type: string; normalBalance: 'debit' | 'credit';
@@ -205,39 +206,6 @@ function ChartOfAccounts(props: CapabilityPanelProps) {
   );
 }
 
-function OrgPeriods(props: CapabilityPanelProps) {
-  const { orgId } = useWorkspaceTools();
-  const periods = useData<{ periods: Period[] }>(`/api/orgs/${orgId}/periods`);
-  const { run, busy } = useAction(props);
-  const [feedback, setFeedback] = useState<{ f: ActionFeedback; success: string } | null>(null);
-  async function openNext() {
-    const result = await run('period.open', {});
-    if (!result) return;
-    const p = result.result as Period | undefined;
-    setFeedback({ f: result, success: p ? `Opened ${p.startDate} to ${p.endDate}.` : 'Period opened.' });
-    periods.reload();
-  }
-  return (
-    <div className="panel">
-      {hasAction(props, 'period.open') && (
-        <div className="toolbar"><button type="button" onClick={() => void openNext()} disabled={busy !== null}>{busy ? 'Opening…' : 'Open next period'}</button></div>
-      )}
-      {feedback && <Notice feedback={feedback.f} success={feedback.success} />}
-      {periods.loading ? <Loading /> : periods.error ? <ErrorText message={periods.error} /> : !periods.data?.periods.length ? <p className="muted">No periods yet. Open the first period before posting opening balances.</p> : (
-        <table>
-          <thead><tr><th>Period</th><th>Starts</th><th>Ends</th><th>Status</th></tr></thead>
-          <tbody>{periods.data.periods.map((p) => (
-            <tr key={p.periodId}>
-              <td><Link to={workspacePath(orgId, 'period', p.periodId)}>{MONTHS[Number(p.startDate.slice(5, 7)) - 1]} {p.startDate.slice(0, 4)}</Link></td>
-              <td>{p.startDate}</td><td>{p.endDate}</td><td><span className={`badge badge-${p.state}`}>{p.state}</span></td>
-            </tr>
-          ))}</tbody>
-        </table>
-      )}
-    </div>
-  );
-}
-
 export function TrialBalanceTable(props: { asOf?: string }) {
   const { orgId } = useWorkspaceTools();
   const [asOf, setAsOf] = useState(props.asOf ?? today());
@@ -247,6 +215,7 @@ export function TrialBalanceTable(props: { asOf?: string }) {
       <div className="toolbar">
         <label>As of <input type="date" value={asOf} onChange={(e) => e.target.value && setAsOf(e.target.value)} /></label>
         {tb.data && <span className={tb.data.totalDebits.amount === tb.data.totalCredits.amount ? 'ok' : 'warn'}>{tb.data.totalDebits.amount === tb.data.totalCredits.amount ? 'Balanced' : 'Out of balance'}</span>}
+        <Downloads path={`/export/trial-balance?asOf=${asOf}`} />
       </div>
       {tb.loading ? <Loading /> : tb.error ? <ErrorText message={tb.error} /> : !tb.data?.rows.length ? <p className="muted">No balances at this date.</p> : (
         <table>
@@ -384,7 +353,8 @@ export const PANELS: CapabilityPanels = {
   'client-organisation/overview': OrgOverview,
   'client-organisation/profile': OrgProfile,
   'client-organisation/chart-of-accounts': ChartOfAccounts,
-  'client-organisation/periods': OrgPeriods,
+  'client-organisation/periods': MonthEnd,
+  'client-organisation/statements': Statements,
   'client-organisation/trial-balance': () => <TrialBalanceTable />,
   'client-organisation/activity': OrgActivity,
   'account/ledger': AccountLedger,

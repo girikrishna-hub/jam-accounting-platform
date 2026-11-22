@@ -18,6 +18,8 @@ import {
 import {
   cancelExpense, createExpense, createSupplier, discardExpense, recordExpense, recordSupplierPayment, savePayableSettings, updateExpense, updateSupplier,
 } from '../services/payables.ts';
+import { approveClose, fileGctReturn, reopenMonth, requestClose } from '../services/month-end.ts';
+import { issueStatement } from '../services/statements.ts';
 import { completeReconciliation, createFromLine, deleteRule, importStatement, matchLine, signOffReconciliation, unmatchLine } from '../services/banking.ts';
 import { resolveObject } from './objects.ts';
 import { audit } from '../audit.ts';
@@ -106,6 +108,15 @@ const HANDLERS: Record<string, Handler> = {
   'bank-rule.delete': async (ctx, scope, _id, input) => deleteRule(ctx, scope, input),
   'bank.reconcile': async (ctx, scope, _id, input) => completeReconciliation(ctx, scope, input),
   'bank.sign-off': async (ctx, scope, _id, input) => signOffReconciliation(ctx, scope, input),
+  // Slice 5: month end and statements
+  'period.request-close': async (ctx, scope, _id, input) => requestClose(ctx, scope, input),
+  'period.approve-close': async (ctx, scope, _id, input) => approveClose(ctx, scope, input),
+  'period.reopen': async (ctx, scope, _id, input) => reopenMonth(ctx, scope, input),
+  'gct.file': async (ctx, scope, _id, input) => fileGctReturn(ctx, scope, input),
+  'statement.issue': async (ctx, scope, _id, input) => {
+    const s = await issueStatement(ctx, scope, input);
+    return { issueNumber: s.issueNumber, statementType: s.statement.content.parameters.statementType };
+  },
 };
 
 export interface ExecuteRequest {

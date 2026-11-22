@@ -19,24 +19,30 @@ const access = new AccessAuthority(config.firmId, (q, decision, reason) => audit
 }).catch(() => undefined));
 const ledger = await LedgerGateway.create(db, config.decisionSigningKey, access);
 
-// Optional start-up setup, so no one has to run database commands by hand.
-// SEED_DEMO=1 with DEMO_PASSWORD loads the demo clients and users (skips anything already there).
-if (process.env.SEED_DEMO === '1') {
-  const password = process.env.DEMO_PASSWORD ?? '';
-  if (!checkPassword(password).ok) console.error(`SEED_DEMO=1 needs a valid DEMO_PASSWORD; demo not loaded. ${PASSWORD_RULE}`);
-  else await seedDemo(db, ledger, password, (line) => console.log(`[demo] ${line}`));
-}
-// ADMIN_EMAIL and ADMIN_PASSWORD create the first firm administrator when none exists yet.
-if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
-  const admins = await db.query('SELECT 1 FROM app.users WHERE is_firm_admin');
-  if (!admins.rowCount) {
-    await createUser(db, null, { email: process.env.ADMIN_EMAIL, displayName: process.env.ADMIN_NAME ?? 'Firm administrator', password: process.env.ADMIN_PASSWORD, isFirmAdmin: true });
-    console.log(`Created firm administrator ${process.env.ADMIN_EMAIL}.`);
+const app = createApp({ db, ledger, access, config });
+// Answer health checks first; optional set-up runs after the server is listening.
+const server = app.listen(config.port, '0.0.0.0', () => {
+  console.log(`Listening on port ${config.port}`);
+  void startupSetup().catch((e) => console.error('Start-up set-up failed', e));
+});
+
+/** Optional start-up setup, so no one has to run database commands by hand. */
+async function startupSetup(): Promise<void> {
+  // SEED_DEMO=1 with DEMO_PASSWORD loads the demo clients and users (skips anything already there).
+  if (process.env.SEED_DEMO === '1') {
+    const password = process.env.DEMO_PASSWORD ?? '';
+    if (!checkPassword(password).ok) console.error(`SEED_DEMO=1 needs a valid DEMO_PASSWORD; demo not loaded. ${PASSWORD_RULE}`);
+    else await seedDemo(db, ledger, password, (line) => console.log(`[demo] ${line}`));
+  }
+  // ADMIN_EMAIL and ADMIN_PASSWORD create the first firm administrator when none exists yet.
+  if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+    const admins = await db.query('SELECT 1 FROM app.users WHERE is_firm_admin');
+    if (!admins.rowCount) {
+      await createUser(db, null, { email: process.env.ADMIN_EMAIL, displayName: process.env.ADMIN_NAME ?? 'Firm administrator', password: process.env.ADMIN_PASSWORD, isFirmAdmin: true });
+      console.log(`Created firm administrator ${process.env.ADMIN_EMAIL}.`);
+    }
   }
 }
-
-const app = createApp({ db, ledger, access, config });
-const server = app.listen(config.port, '0.0.0.0', () => console.log(`Listening on port ${config.port}`));
 
 // No event consumers in release 1: drain the ledger outbox every 30 seconds.
 const drain = setInterval(() => { ledger.dispatchEvents().catch((e) => console.error('Event dispatch failed', e)); }, 30_000);

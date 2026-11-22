@@ -14,6 +14,10 @@ import {
   supplierBalances, supplierPayments,
 } from '../../services/payables.ts';
 import { bankOverview, completePendingBank, flaggedEntries, reconciliation } from '../../services/banking.ts';
+import { gctWorking, monthEnd } from '../../services/month-end.ts';
+import { draftStatement, ensureStatements, monthStart } from '../../services/statements.ts';
+import { statementTable, tablePdf, tableXlsx, type Table } from '../../reports/export.ts';
+import { agedDebtorsTable, feeNoteTable, gctTable, supplierBalancesTable, trialBalanceTable } from '../../reports/reports.ts';
 
 const STATUSES = ['draft', 'submitted', 'returned', 'approved', 'posted', 'discarded', 'reversed'] as const;
 
@@ -291,6 +295,96 @@ export function orgRoutes(ctx: AppContext): Router {
     const periodEnd = asked ?? [...periods].reverse().find((p) => !lastLine || p <= lastLine) ?? periods[periods.length - 1];
     const rec = overview.statements.length && periodEnd ? await reconciliation(ctx, scope, code, periodEnd) : null;
     res.json({ currency: scope.org.currency, bankAccounts, ...overview, periods, periodEnd, reconciliation: rec, flagged: await flaggedEntries(ctx.db, scope.org.id), accounts });
+  });
+
+  // ---------- Slice 5: month end, statements and downloads ----------
+
+  r.get('/month-end', async (req, res) => {
+    const scope = scopeOf(res);
+    await clientCapability(ctx, res, 'periods');
+    const periodId = z.string().max(100).optional().parse(req.query.periodId);
+    const m = await monthEnd(ctx, scope, periodId);
+    const chosen = m.periods.find((p) => p.periodId === m.periodId);
+    const gct = chosen ? await gctWorking(ctx.db, scope.org.id, chosen.startDate, chosen.endDate) : null;
+    res.json({ currency: scope.org.currency, ...m, gct });
+  });
+
+  r.get('/statements', async (req, res) => {
+    const scope = scopeOf(res);
+    await clientCapability(ctx, res, 'statements');
+    const staff = scope.role !== 'client_viewer';
+    const registered = await ensureStatements(ctx, scope);
+    const issued = registered ? await ctx.ledger.listIssuedStatements(scope.actor) : [];
+    if (!staff) { res.json({ currency: scope.org.currency, staff, issued, periods: [], periodEnd: null, drafts: null }); return; }
+    const periods = (await ctx.ledger.listPeriods(scope.actor)).sort((a, b) => a.endDate.localeCompare(b.endDate)).map((p) => ({ periodId: p.periodId, endDate: p.endDate, state: p.state }));
+    const asked = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().parse(req.query.periodEnd);
+    const periodEnd = asked ?? [...periods].reverse().find((p) => p.state === 'closed')?.endDate ?? periods[0]?.endDate ?? null;
+    const drafts = periodEnd && registered ? {
+      profitAndLoss: await draftStatement(ctx, scope, 'profitAndLoss', periodEnd),
+      balanceSheet: await draftStatement(ctx, scope, 'balanceSheet', periodEnd),
+    } : null;
+    res.json({ currency: scope.org.currency, staff, registered, issued, periods, periodEnd, closed: periods.find((p) => p.endDate === periodEnd)?.state === 'closed', drafts });
+  });
+
+  r.get('/statements/issued/:type/:issue', async (req, res) => {
+    const scope = scopeOf(res);
+    await clientCapability(ctx, res, 'statements');
+    const type = z.enum(['profitAndLoss', 'balanceSheet']).parse(req.params.type);
+    const issue = z.coerce.number().int().positive().parse(req.params.issue);
+    const statement = await ctx.ledger.getIssuedStatement(scope.actor, type, issue);
+    const verification = scope.role === 'client_viewer' ? null : await ctx.ledger.verifyIssuedStatement(scope.actor, type, issue);
+    res.json({ currency: scope.org.currency, statement, verification });
+  });
+
+  const send = async (res: Parameters<typeof scopeOf>[0], table: Table, format: 'pdf' | 'xlsx') => {
+    const name = table.fileName.replace(/[^A-Za-z0-9 ._-]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'report';
+    const body = format === 'pdf' ? await tablePdf(table) : tableXlsx(table);
+    res.setHeader('Content-Type', format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${name}.${format}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(body);
+  };
+  const FORMAT = z.enum(['pdf', 'xlsx']);
+  const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+  r.get('/export/:report', async (req, res) => {
+    const scope = scopeOf(res);
+    const report = z.enum(['statement', 'trial-balance', 'gct', 'aged-debtors', 'supplier-balances']).parse(req.params.report);
+    const format = FORMAT.parse(req.query.format ?? 'pdf');
+    if (report === 'statement') {
+      await clientCapability(ctx, res, 'statements');
+      const type = z.enum(['profitAndLoss', 'balanceSheet']).parse(req.query.type);
+      const issue = req.query.issue === undefined ? undefined : z.coerce.number().int().positive().parse(req.query.issue);
+      if (issue) {
+        const issued = await ctx.ledger.getIssuedStatement(scope.actor, type, issue);
+        await send(res, statementTable(issued.statement, { issueNumber: issued.issueNumber, replacedBy: issued.replacedBy ?? null }), format);
+      } else {
+        await clientCapability(ctx, res, 'periods'); // drafts are for staff only
+        await send(res, statementTable(await draftStatement(ctx, scope, type, DATE.parse(req.query.periodEnd)), {}), format);
+      }
+      return;
+    }
+    if (report === 'trial-balance') {
+      await clientCapability(ctx, res, 'trial-balance');
+      await send(res, await trialBalanceTable(ctx, scope, DATE.parse(req.query.asOf)), format);
+      return;
+    }
+    await clientCapability(ctx, res, 'periods');
+    if (report === 'gct') {
+      const end = DATE.parse(req.query.periodEnd);
+      await send(res, await gctTable(ctx, scope, monthStart(end), end), format);
+    } else if (report === 'aged-debtors') {
+      await send(res, await agedDebtorsTable(ctx, scope, DATE.parse(req.query.asOf)), format);
+    } else {
+      await send(res, await supplierBalancesTable(ctx, scope, z.coerce.number().int().min(2000).max(2100).parse(req.query.year)), format);
+    }
+  });
+
+  r.get('/fee-notes/:feeNoteId/pdf', async (req, res) => {
+    const scope = scopeOf(res);
+    const feeNoteId = z.string().uuid().parse(req.params.feeNoteId);
+    await requireAllowed(ctx, scope, 'fee-note', feeNoteId, 'capability.details.view');
+    await send(res, await feeNoteTable(ctx, scope, feeNoteId), 'pdf');
   });
 
   return r;
