@@ -40,6 +40,22 @@ export const LEDGER_POLICY: Readonly<Record<string, readonly LedgerPrincipal[]>>
   'bookkeeping.GetPostedLines': READ_ALL,
   'bookkeeping.ListEvents': [],
   'bookkeeping.ListAuditRecords': READ_ALL,
+  // Financial statements (slice 5): staff set up and see drafts; accountants issue; everyone sees issued statements.
+  'financialStatements.RegisterLedger': PREPARER,
+  'financialStatements.UpdateLedgerSettings': PREPARER,
+  'financialStatements.SaveLayout': PREPARER,
+  'financialStatements.SetDefaultLayout': PREPARER,
+  'financialStatements.IssueStatement': PREPARER,
+  'financialStatements.GetLedgerSettings': READ_ALL,
+  'financialStatements.ListLayouts': STAFF,
+  'financialStatements.GetLayout': STAFF,
+  'financialStatements.GenerateProfitAndLoss': STAFF,
+  'financialStatements.GenerateBalanceSheet': STAFF,
+  'financialStatements.GetIssuedStatement': READ_ALL,
+  'financialStatements.ListIssuedStatements': READ_ALL,
+  'financialStatements.VerifyIssuedStatement': STAFF,
+  'financialStatements.ListEvents': [],
+  'financialStatements.ListAuditRecords': STAFF,
 };
 
 export class AccessDenied extends Error {

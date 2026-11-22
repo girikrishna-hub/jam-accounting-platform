@@ -75,7 +75,8 @@ export const OBJECT_TYPES: readonly ObjectTypeModel[] = [
       { capabilityId: 'receivables', label: 'Receivables', order: 37, roles: STAFF, actionIds: ['receivables.settings', 'customer.create', 'fee-note.create', 'receipt.record', 'receipt.reassign'] },
       { capabilityId: 'payables', label: 'Expenses', order: 38, roles: STAFF, actionIds: ['payables.settings', 'supplier.create', 'expense.create', 'supplier-payment.record'] },
       { capabilityId: 'banking', label: 'Bank', order: 39, roles: STAFF, actionIds: ['bank.import', 'bank.match', 'bank.unmatch', 'bank.create', 'bank-rule.delete', 'bank.reconcile', 'bank.sign-off'] },
-      { capabilityId: 'periods', label: 'Periods', order: 40, roles: STAFF, actionIds: ['period.open'] },
+      { capabilityId: 'periods', label: 'Month end', order: 40, roles: STAFF, actionIds: ['period.open', 'period.request-close', 'period.approve-close', 'period.reopen', 'gct.file'] },
+      { capabilityId: 'statements', label: 'Statements', order: 45, roles: ALL, actionIds: ['statement.issue'] },
       { capabilityId: 'trial-balance', label: 'Trial balance', order: 50, roles: ALL, actionIds: [] },
       { capabilityId: 'activity', label: 'Activity', order: 60, roles: ALL, actionIds: [] },
     ],
@@ -260,6 +261,12 @@ export const ACTIONS: readonly ActionModel[] = [
   { actionId: 'expense.record', label: 'Record expense', objectTypeId: 'expense', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
   { actionId: 'expense.discard', label: 'Discard draft', objectTypeId: 'expense', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'edit' },
   { actionId: 'expense.cancel', label: 'Cancel expense', objectTypeId: 'expense', capabilityId: 'details', roles: PREPARER, requiresConfirmation: true, category: 'post' },
+  // Slice 5: month end and statements
+  { actionId: 'period.request-close', label: 'Ask to close the month', objectTypeId: 'client-organisation', capabilityId: 'periods', roles: PREPARER, requiresConfirmation: true, category: 'workflow' },
+  { actionId: 'period.approve-close', label: 'Approve and close the month', objectTypeId: 'client-organisation', capabilityId: 'periods', roles: REVIEWER, requiresConfirmation: true, category: 'workflow' },
+  { actionId: 'period.reopen', label: 'Reopen the month', objectTypeId: 'client-organisation', capabilityId: 'periods', roles: REVIEWER, requiresConfirmation: true, category: 'workflow' },
+  { actionId: 'gct.file', label: 'Mark GCT return filed', objectTypeId: 'client-organisation', capabilityId: 'periods', roles: PREPARER, requiresConfirmation: true, category: 'post' },
+  { actionId: 'statement.issue', label: 'Issue statement', objectTypeId: 'client-organisation', capabilityId: 'statements', roles: PREPARER, requiresConfirmation: true, category: 'post' },
   // Slice 4: bank reconciliation
   { actionId: 'bank.import', label: 'Import statement', objectTypeId: 'client-organisation', capabilityId: 'banking', roles: PREPARER, requiresConfirmation: false, category: 'import' },
   { actionId: 'bank.match', label: 'Match', objectTypeId: 'client-organisation', capabilityId: 'banking', roles: PREPARER, requiresConfirmation: false, category: 'edit' },

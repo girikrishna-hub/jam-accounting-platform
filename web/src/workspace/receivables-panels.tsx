@@ -580,6 +580,7 @@ export function FeeNoteDetails(props: CapabilityPanelProps) {
     <div className="panel">
       <div className="toolbar no-print">
         <button type="button" className="secondary" onClick={() => window.print()}>Print</button>
+        {!n.broughtForward && <a className="button-link" href={`/api/orgs/${orgId}/fee-notes/${n.id}/pdf`} download>Download PDF</a>}
         {!n.broughtForward && outstanding > 0n && hasAction(props, 'fee-note.allocate') && data.available.payments.length > 0 && <button type="button" className="secondary" onClick={() => setPanel('allocate')}>Allocate a payment</button>}
         {!n.broughtForward && outstanding > 0n && hasAction(props, 'fee-note.apply-retainer') && data.available.retainers.length > 0 && <button type="button" className="secondary" onClick={() => setPanel('retainer')}>Apply retainer</button>}
         {!n.broughtForward && outstanding > 0n && hasAction(props, 'fee-note.credit') && <button type="button" className="secondary" onClick={() => setPanel('credit')}>Credit note</button>}

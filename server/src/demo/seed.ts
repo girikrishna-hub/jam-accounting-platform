@@ -17,6 +17,9 @@ import {
 } from '../services/receivables.ts';
 import { createExpense, createSupplier, getPayableSettings, savePayableSettings } from '../services/payables.ts';
 import { bankOverview, createFromLine, importStatement, matchLine } from '../services/banking.ts';
+import { accountsByCode, postForDocument } from '../services/documents.ts';
+import { formatMinor, parseAmount } from '../domain/money.ts';
+import { parseCsv } from '../domain/csv.ts';
 
 const seedDir = fileURLToPath(new URL('../../../seed/harbourview/', import.meta.url));
 
@@ -71,6 +74,11 @@ export async function seedDemo(db: Db, ledger: LedgerGateway, password: string, 
   }
 
   // Never blocks start-up: if January is closed or anything fails, say so and carry on.
+  try {
+    await seedYearEndClose2025(db, ledger, { org: { ...harbourview, ledger_id: harbourview.ledger_id! }, role: 'accountant', actor }, log);
+  } catch (e) {
+    log(`2025 year-end close not posted: ${e instanceof Error ? e.message : String(e)}`);
+  }
   try {
     await seedJanuaryReceivables(db, ledger, { org: { ...harbourview, ledger_id: harbourview.ledger_id! }, role: 'accountant', actor }, log);
   } catch (e) {
@@ -302,4 +310,50 @@ async function seedJanuaryBank(db: Db, ledger: LedgerGateway, scope: Scope, log:
     await createFromLine(ctx, scope, { lineId: (await line(text)).id, kind: 'entry', targetAccount: account, description, flag, remember });
   }
   log(`January bank statement: 33 lines imported; ${matched + 1} matched to entries already in the books, 10 entered from the bank, 6 left to work, 1 waiting (loan instalment)`);
+}
+
+// ---------- 2025 year-end close (sample data pack: LF_PartnerProfitShare) ----------
+
+/** Each partner's share of 2025's profit (salary, interest on capital and residual share), per the sample. */
+const PROFIT_SHARE_2025: [currentAccount: string, drawingsAccount: string, share: string][] = [
+  ['3100', '3200', '58036535.00'], ['3110', '3210', '45167305.00'], ['3120', '3220', '26638460.00'],
+];
+
+/**
+ * The demo's opening balances are Harbourview's trial balance at 31 December 2025 before the year was closed:
+ * they still hold 2025's income, expenses and drawings. This journal, dated 1 January 2026, clears 2025's income
+ * and expenses into the partners' current accounts in the sample's profit shares, and clears 2025's drawings
+ * into the current accounts too, so 2026 starts from the sample's closing balance sheet (current accounts
+ * 57,762,300.00).
+ */
+async function seedYearEndClose2025(db: Db, ledger: LedgerGateway, scope: Scope, log: (line: string) => void): Promise<void> {
+  const done = await db.query(`SELECT 1 FROM app.journals WHERE org_id = $1 AND source_type = 'year-end-close'`, [scope.org.id]);
+  if (done.rowCount) { log('2025 year-end close already posted.'); return; }
+  const january = (await ledger.listPeriods(scope.actor)).find((p) => p.startDate === '2026-01-01');
+  if (january?.state !== 'open') { log('2025 year-end close not posted: January 2026 is not open.'); return; }
+  const accounts = await accountsByCode({ db, ledger }, scope);
+  const rows = parseCsv(await readFile(seedDir + 'trial-balance-2025-12-31.csv', 'utf8')).slice(1).filter((r) => /^\d{4}$/.test(r[0] ?? ''));
+  const opening = new Map(rows.map((r) => [r[0]!, parseAmount(r[2] || '0')! - parseAmount(r[3] || '0')!])); // debit-positive
+  const lines: Parameters<typeof postForDocument>[2]['lines'] = [];
+  let profit = 0n;
+  for (const [code, balance] of opening) {
+    if (!/^[45]/.test(code) || balance === 0n) continue;
+    profit -= balance;
+    lines.push({ account: accounts.get(code)!, side: balance > 0n ? 'credit' : 'debit', amount: balance > 0n ? balance : -balance, memo: 'Close 2025 to partners' });
+  }
+  const shares = PROFIT_SHARE_2025.reduce((t, [, , s]) => t + parseAmount(s)!, 0n);
+  if (shares !== profit) throw new Error(`2025 profit in the opening balances is ${profit}, but the profit shares add up to ${shares}.`);
+  for (const [current, drawings, share] of PROFIT_SHARE_2025) {
+    lines.push({ account: accounts.get(current)!, side: 'credit', amount: parseAmount(share)!, memo: 'Share of 2025 profit' });
+    const drawn = opening.get(drawings) ?? 0n;
+    if (drawn > 0n) {
+      lines.push({ account: accounts.get(drawings)!, side: 'credit', amount: drawn, memo: 'Clear 2025 drawings' });
+      lines.push({ account: accounts.get(current)!, side: 'debit', amount: drawn, memo: '2025 drawings' });
+    }
+  }
+  await postForDocument({ db, ledger }, scope, {
+    sourceType: 'year-end-close', sourceId: '00000000-0000-4000-8000-000000002025', date: '2026-01-01', reference: 'YE 2025',
+    description: '2025 year-end close: profit shared to partners and drawings cleared to current accounts', lines,
+  });
+  log(`2025 year-end close posted: profit ${formatMinor(profit)} shared to partners' current accounts`);
 }
